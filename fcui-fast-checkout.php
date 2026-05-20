@@ -1,8 +1,8 @@
 <?php
 /**
  * Plugin Name: پرداخت سریع - سلام وردپرس
- * Description: این پلاگین صفحه ی پرداخت سریع را جایگزین فرایند سفارش ووکامرس میکند. نسخه پیشرفته با پشتیبانی محصولات فیزیکی، کد تخفیف و پنل مدیریت حرفه‌ای
- * Version: 2.1.0
+ * Description: این پلاگین صفحه ی پرداخت سریع را جایگزین فرایند سفارش ووکامرس میکند. نسخه پیشرفته با پشتیبانی محصولات فیزیکی، کد تخفیف، کمپین زماندار و پنل مدیریت حرفه‌ای
+ * Version: 2.2.0
  * Author: امیرحسین سعادتی
  * Text Domain: fcui
  */
@@ -14,7 +14,7 @@ final class FCUI_Fast_Checkout {
     const OPT_FAST_PAGE_ID = 'fcui_fast_checkout_page_id';
     const OPT_C2C_PAGE_ID  = 'fcui_card2card_page_id';
     const OPT_SETTINGS     = 'fcui_settings';
-    const VERSION = '2.1.0';
+    const VERSION = '2.2.0';
 
     const FAST_PAGE_TITLE = 'پرداخت سریع';
     const FAST_PAGE_SLUG  = 'fast-checkout';
@@ -71,6 +71,14 @@ final class FCUI_Fast_Checkout {
         // Save custom fields
         add_action('woocommerce_checkout_update_order_meta', [__CLASS__, 'save_custom_fields']);
         add_action('woocommerce_admin_order_data_after_billing_address', [__CLASS__, 'display_custom_fields_admin']);
+
+        // Campaign system
+        add_action('add_meta_boxes', [__CLASS__, 'add_campaign_metabox']);
+        add_action('save_post_product', [__CLASS__, 'save_campaign_meta']);
+        add_filter('woocommerce_product_get_price', [__CLASS__, 'apply_campaign_price'], 20, 2);
+        add_filter('woocommerce_product_get_regular_price', [__CLASS__, 'apply_campaign_regular_price'], 20, 2);
+        add_filter('woocommerce_product_variation_get_price', [__CLASS__, 'apply_campaign_price'], 20, 2);
+        add_action('woocommerce_single_product_summary', [__CLASS__, 'show_campaign_timer'], 11);
     }
 
     public static function activate() {
@@ -135,7 +143,7 @@ final class FCUI_Fast_Checkout {
             'c2c_card_number' => '6037-9911-1234-5678',
             'c2c_holder_name' => 'امیرحسین سعادتی',
             'c2c_bank_name'   => 'بانک ملی',
-            'c2c_theme'       => 'blue',
+            'c2c_theme'       => 'melli',
             'c2c_timer_minutes' => 20,
             'c2c_approved_status' => 'completed',
             'c2c_max_mb' => 3,
@@ -224,6 +232,86 @@ final class FCUI_Fast_Checkout {
         $s = self::get_settings();
         if (empty($s['physical_enabled'])) return false;
         return !$product->is_virtual() && !$product->is_downloadable();
+    }
+
+    // Campaign functions
+    public static function add_campaign_metabox() {
+        add_meta_box('fcui_campaign', '⏰ کمپین تخفیف زماندار', [__CLASS__, 'campaign_metabox_html'], 'product', 'side', 'high');
+    }
+
+    public static function campaign_metabox_html($post) {
+        $start = get_post_meta($post->ID, '_fcui_campaign_start', true);
+        $end = get_post_meta($post->ID, '_fcui_campaign_end', true);
+        $price = get_post_meta($post->ID, '_fcui_campaign_price', true);
+        wp_nonce_field('fcui_campaign', 'fcui_campaign_nonce');
+        echo '<p><label>قیمت کمپین:</label><input type="number" name="fcui_campaign_price" value="'.esc_attr($price).'" style="width:100%" placeholder="مثلا 99000"></p>';
+        echo '<p><label>شروع:</label><input type="datetime-local" name="fcui_campaign_start" value="'.esc_attr($start).'" style="width:100%"></p>';
+        echo '<p><label>پایان:</label><input type="datetime-local" name="fcui_campaign_end" value="'.esc_attr($end).'" style="width:100%"></p>';
+        echo '<p style="font-size:12px;color:#666">در بازه زمانی مشخص شده، قیمت محصول خودکار تغییر می‌کند و تایمر نمایش داده می‌شود.</p>';
+    }
+
+    public static function save_campaign_meta($post_id) {
+        if (!isset($_POST['fcui_campaign_nonce']) || !wp_verify_nonce($_POST['fcui_campaign_nonce'], 'fcui_campaign')) return;
+        update_post_meta($post_id, '_fcui_campaign_price', sanitize_text_field($_POST['fcui_campaign_price'] ?? ''));
+        update_post_meta($post_id, '_fcui_campaign_start', sanitize_text_field($_POST['fcui_campaign_start'] ?? ''));
+        update_post_meta($post_id, '_fcui_campaign_end', sanitize_text_field($_POST['fcui_campaign_end'] ?? ''));
+    }
+
+    public static function apply_campaign_price($price, $product) {
+        $id = $product->get_id();
+        $camp_price = get_post_meta($id, '_fcui_campaign_price', true);
+        $start = get_post_meta($id, '_fcui_campaign_start', true);
+        $end = get_post_meta($id, '_fcui_campaign_end', true);
+        
+        if (!$camp_price || !$start || !$end) return $price;
+        
+        $now = current_time('timestamp');
+        $start_ts = strtotime($start);
+        $end_ts = strtotime($end);
+        
+        if ($now >= $start_ts && $now <= $end_ts) {
+            return $camp_price;
+        }
+        return $price;
+    }
+
+    public static function apply_campaign_regular_price($price, $product) {
+        return $price; // Keep original as regular
+    }
+
+    public static function show_campaign_timer() {
+        global $product;
+        $id = $product->get_id();
+        $end = get_post_meta($id, '_fcui_campaign_end', true);
+        $start = get_post_meta($id, '_fcui_campaign_start', true);
+        $camp_price = get_post_meta($id, '_fcui_campaign_price', true);
+        
+        if (!$end || !$camp_price) return;
+        
+        $now = current_time('timestamp');
+        $end_ts = strtotime($end);
+        $start_ts = strtotime($start);
+        
+        if ($now < $start_ts || $now > $end_ts) return;
+        
+        echo '<div class="fcui-campaign-timer" data-end="'.esc_attr($end_ts).'" style="background:linear-gradient(135deg,#ef4444,#dc2626);color:#fff;padding:12px;border-radius:12px;margin:15px 0;text-align:center;font-weight:900">
+            ⏰ پیشنهاد ویژه - زمان باقیمانده: <span class="fcui-timer">--:--:--</span>
+        </div>
+        <script>
+        (function(){
+            const el = document.querySelector(".fcui-campaign-timer .fcui-timer");
+            const end = '.($end_ts*1000).';
+            function tick(){
+                const diff = end - Date.now();
+                if(diff<=0){el.textContent="00:00:00";return}
+                const h = Math.floor(diff/3600000);
+                const m = Math.floor((diff%3600000)/60000);
+                const s = Math.floor((diff%60000)/1000);
+                el.textContent = String(h).padStart(2,"0")+":"+String(m).padStart(2,"0")+":"+String(s).padStart(2,"0");
+            }
+            tick(); setInterval(tick,1000);
+        })();
+        </script>';
     }
 
     private static function get_myaccount_url() {
@@ -331,6 +419,7 @@ final class FCUI_Fast_Checkout {
         wp_enqueue_style('wp-color-picker');
         wp_enqueue_script('wp-color-picker');
         wp_enqueue_media();
+        wp_enqueue_style('fcui-admin', plugins_url('assets/fast-checkout.css', __FILE__), [], self::VERSION);
     }
 
     public static function filter_add_to_cart_url($url, $product) {
@@ -350,7 +439,6 @@ final class FCUI_Fast_Checkout {
         $s = self::get_settings();
 
         if ($is_physical) {
-            // محصولات فیزیکی - فیلدهای انتخابی
             $keep = ['billing_first_name', 'billing_last_name', 'billing_phone', 'billing_email'];
             if (!empty($s['physical_fields'])) {
                 $keep = array_merge($keep, $s['physical_fields']);
@@ -364,7 +452,6 @@ final class FCUI_Fast_Checkout {
                 }
             }
             
-            // کد ملی
             if (!empty($s['enable_national_code'])) {
                 $fields['billing']['billing_national_code'] = [
                     'label' => $s['national_code_label'],
@@ -374,7 +461,6 @@ final class FCUI_Fast_Checkout {
                 ];
             }
             
-            // فیلدهای سفارشی
             if (!empty($s['custom_fields'])) {
                 foreach ($s['custom_fields'] as $cf) {
                     if (empty($cf['key']) || empty($cf['active'])) continue;
@@ -389,7 +475,6 @@ final class FCUI_Fast_Checkout {
             
             return $fields;
         } else {
-            // محصولات دیجیتال - مینیمال
             $keep = ['billing_first_name', 'billing_last_name', 'billing_phone', 'billing_email'];
             if (isset($fields['billing']) && is_array($fields['billing'])) {
                 foreach ($fields['billing'] as $key => $field) {
@@ -542,6 +627,16 @@ final class FCUI_Fast_Checkout {
         } elseif (!$product) {
             echo '<div style="max-width:680px;margin:40px auto;padding:0 14px;">محصول مشخص نیست.</div>';
         } else {
+            // Campaign timer for checkout
+            $end = get_post_meta($product_id, '_fcui_campaign_end', true);
+            $start = get_post_meta($product_id, '_fcui_campaign_start', true);
+            if ($end && $start) {
+                $now = current_time('timestamp');
+                if ($now >= strtotime($start) && $now <= strtotime($end)) {
+                    echo '<div style="max-width:680px;margin:10px auto 0;padding:0 14px"><div class="fcui-campaign-timer" data-end="'.strtotime($end).'" style="background:linear-gradient(135deg,#ef4444,#dc2626);color:#fff;padding:10px;border-radius:12px;text-align:center;font-weight:900;font-size:13px">⏰ زمان باقیمانده تخفیف: <span class="fcui-timer">--:--:--</span></div></div>';
+                    echo '<script>const el=document.querySelector(".fcui-timer");const end='.strtotime($end).'*1000;function t(){const d=end-Date.now();if(d<=0)return;const h=Math.floor(d/36e5),m=Math.floor(d%36e5/6e4),s=Math.floor(d%6e4/1e3);el.textContent=`${String(h).padStart(2,0)}:${String(m).padStart(2,0)}:${String(s).padStart(2,0)}`}t();setInterval(t,1e3)</script>';
+                }
+            }
             if ($is_physical && file_exists(__DIR__ . '/templates/fast-checkout-physical.php')) {
                 include __DIR__ . '/templates/fast-checkout-physical.php';
             } else {
@@ -612,14 +707,12 @@ final class FCUI_Fast_Checkout {
             exit;
         }
 
-        // افزودن به سبد برای بعد
         if (isset($_POST['fcui_add_to_cart_later'])) {
             WC()->cart->add_to_cart($product_id, $qty, $variation_id, $variation);
             wp_safe_redirect(wc_get_cart_url());
             exit;
         }
 
-        // ثبت نام رایگان
         if (isset($_POST['fcui_free_register'])) {
             $user_id = get_current_user_id();
             if (!$user_id) {
@@ -643,6 +736,7 @@ final class FCUI_Fast_Checkout {
                 'phone'      => $phone,
             ] + $extra_data, 'billing');
             $order->set_customer_id($user_id);
+            $order->update_meta_data('_fcui_fast_checkout', 1);
             $order->calculate_totals();
             $order->update_status('completed');
             $order->save();
@@ -655,7 +749,6 @@ final class FCUI_Fast_Checkout {
             exit;
         }
 
-        // پرداخت
         $payment_method = sanitize_text_field($_POST['payment_method'] ?? '');
         if (!$payment_method) {
             wp_safe_redirect(self::get_fast_checkout_url(['product_id' => $product_id, 'err' => 1]));
@@ -680,7 +773,6 @@ final class FCUI_Fast_Checkout {
             exit;
         }
 
-        // کد تخفیف
         if (!empty($_POST['fcui_coupon'])) {
             $coupon_code = sanitize_text_field($_POST['fcui_coupon']);
             WC()->cart->apply_coupon($coupon_code);
@@ -715,6 +807,10 @@ final class FCUI_Fast_Checkout {
             $_POST['woocommerce-process-checkout-nonce'] = wp_create_nonce('woocommerce-process_checkout');
         }
 
+        add_action('woocommerce_checkout_update_order_meta', function($order_id){
+            update_post_meta($order_id, '_fcui_fast_checkout', 1);
+        });
+
         WC()->checkout()->process_checkout();
         exit;
     }
@@ -739,6 +835,7 @@ final class FCUI_Fast_Checkout {
             $mins = max(1, (int)$s['c2c_timer_minutes']);
             $expires = time() + ($mins * 60);
             $order->update_meta_data('_fcui_c2c_expires_at', $expires);
+            $order->update_meta_data('_fcui_fast_checkout', 1);
             $order->update_status('on-hold', 'در انتظار پرداخت کارت به کارت و بررسی رسید');
             $order->save();
             WC()->cart->empty_cart();
@@ -884,42 +981,101 @@ final class FCUI_Fast_Checkout {
     public static function admin_dashboard() {
         if (!current_user_can('manage_woocommerce')) return;
         $s = self::get_settings();
-        $orders_count = wc_get_orders(['limit' => -1, 'payment_method' => 'fcui_card2card', 'status' => 'on-hold', 'return' => 'ids']);
+        
+        // آمار پیشرفته
+        $orders_c2c = wc_get_orders(['limit' => -1, 'payment_method' => 'fcui_card2card', 'status' => 'on-hold', 'return' => 'ids']);
+        $orders_fast = wc_get_orders(['limit' => -1, 'meta_key' => '_fcui_fast_checkout', 'return' => 'ids']);
+        $orders_today = wc_get_orders(['date_created' => '>=' . date('Y-m-d 00:00:00'), 'return' => 'ids']);
+        
+        $revenue_today = 0;
+        foreach ($orders_today as $oid) {
+            $o = wc_get_order($oid);
+            if ($o && $o->has_status(['processing','completed'])) $revenue_today += (float)$o->get_total();
+        }
+        
+        $total_orders = wc_get_orders(['limit' => -1, 'return' => 'ids']);
+        $conversion = count($total_orders) > 0 ? round((count($orders_fast) / count($total_orders)) * 100, 1) : 0;
+        
+        $campaigns_active = 0;
+        $products = wc_get_products(['limit' => -1, 'return' => 'ids']);
+        foreach ($products as $pid) {
+            $end = get_post_meta($pid, '_fcui_campaign_end', true);
+            if ($end && strtotime($end) > time()) $campaigns_active++;
+        }
         ?>
         <div class="wrap fcui-admin" style="direction:rtl;font-family:Tahoma">
-            <h1 style="display:flex;align-items:center;gap:12px">
-                <span class="dashicons dashicons-money-alt" style="font-size:32px;color:#1e6bff"></span>
-                پرداخت سریع - داشبورد
-                <span style="background:#1e6bff;color:#fff;padding:4px 10px;border-radius:8px;font-size:12px">v<?php echo self::VERSION; ?></span>
+            <h1 style="display:flex;align-items:center;gap:12px;margin-bottom:30px">
+                <span class="dashicons dashicons-money-alt" style="font-size:36px;color:#1e6bff"></span>
+                <div>
+                    <div>پرداخت سریع</div>
+                    <div style="font-size:13px;color:#64748b;font-weight:400">نسخه <?php echo self::VERSION; ?> - داشبورد هوشمند</div>
+                </div>
             </h1>
             
-            <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:20px;margin-top:30px">
-                <div style="background:#fff;border:1px solid #e2e8f0;border-radius:16px;padding:24px;box-shadow:0 4px 12px rgba(0,0,0,.05)">
-                    <div style="display:flex;justify-content:space-between;align-items:start">
-                        <div>
-                            <div style="color:#64748b;font-size:13px;margin-bottom:8px">سفارشات در انتظار</div>
-                            <div style="font-size:32px;font-weight:900;color:#0f172a"><?php echo count($orders_count); ?></div>
-                        </div>
-                        <div style="background:#fef3c7;padding:12px;border-radius:12px"><span class="dashicons dashicons-clock" style="color:#d97706"></span></div>
-                    </div>
-                    <a href="<?php echo admin_url('admin.php?page=fcui-card2card-orders'); ?>" style="display:inline-block;margin-top:16px;color:#1e6bff;text-decoration:none;font-weight:700">مشاهده ←</a>
+            <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:18px">
+                <div style="background:linear-gradient(135deg,#1e6bff,#0ea5e9);color:#fff;border-radius:20px;padding:24px;box-shadow:0 10px 30px rgba(30,107,255,.25);position:relative;overflow:hidden">
+                    <div style="position:absolute;top:-20px;right:-20px;width:100px;height:100px;background:rgba(255,255,255,.1);border-radius:50%"></div>
+                    <div style="font-size:13px;opacity:.9">سفارشات امروز</div>
+                    <div style="font-size:38px;font-weight:900;margin:8px 0"><?php echo count($orders_today); ?></div>
+                    <div style="font-size:12px;opacity:.85">درآمد: <?php echo wc_price($revenue_today); ?></div>
                 </div>
                 
-                <div style="background:#fff;border:1px solid #e2e8f0;border-radius:16px;padding:24px;box-shadow:0 4px 12px rgba(0,0,0,.05)">
-                    <div style="display:flex;justify-content:space-between;align-items:start">
+                <div style="background:#fff;border:1px solid #e2e8f0;border-radius:20px;padding:24px;box-shadow:0 4px 12px rgba(0,0,0,.04)">
+                    <div style="display:flex;justify-content:space-between">
                         <div>
-                            <div style="color:#64748b;font-size:13px;margin-bottom:8px">صفحه پرداخت</div>
-                            <div style="font-size:16px;font-weight:800;color:#0f172a;margin-top:8px"><?php echo esc_html(get_permalink(get_option(self::OPT_FAST_PAGE_ID))); ?></div>
+                            <div style="color:#64748b;font-size:13px">نرخ تبدیل</div>
+                            <div style="font-size:32px;font-weight:900;color:#0f172a;margin-top:6px"><?php echo $conversion; ?>%</div>
                         </div>
-                        <div style="background:#dbeafe;padding:12px;border-radius:12px"><span class="dashicons dashicons-cart" style="color:#1e6bff"></span></div>
+                        <div style="background:#dcfce7;width:44px;height:44px;border-radius:12px;display:flex;align-items:center;justify-content:center"><span class="dashicons dashicons-chart-line" style="color:#16a34a"></span></div>
                     </div>
-                    <a href="<?php echo esc_url(get_permalink(get_option(self::OPT_FAST_PAGE_ID))); ?>" target="_blank" style="display:inline-block;margin-top:16px;color:#1e6bff;text-decoration:none;font-weight:700">مشاهده صفحه ←</a>
+                    <div style="margin-top:12px;height:6px;background:#f1f5f9;border-radius:6px;overflow:hidden"><div style="width:<?php echo $conversion; ?>%;height:100%;background:linear-gradient(90deg,#16a34a,#22c55e)"></div></div>
                 </div>
                 
-                <div style="background:linear-gradient(135deg,#1e6bff,#0ea5e9);border-radius:16px;padding:24px;color:#fff;box-shadow:0 8px 24px rgba(30,107,255,.3)">
-                    <div style="font-size:18px;font-weight:900;margin-bottom:12px">راه‌اندازی سریع</div>
-                    <div style="opacity:.9;font-size:13px;line-height:1.7">برای بهترین تجربه، رنگ برند و فیلدهای فیزیکی را تنظیم کنید.</div>
-                    <a href="<?php echo admin_url('admin.php?page=fcui-settings'); ?>" style="display:inline-block;margin-top:16px;background:#fff;color:#1e6bff;padding:8px 16px;border-radius:10px;text-decoration:none;font-weight:800">تنظیمات</a>
+                <div style="background:#fff;border:1px solid #e2e8f0;border-radius:20px;padding:24px;box-shadow:0 4px 12px rgba(0,0,0,.04)">
+                    <div style="display:flex;justify-content:space-between">
+                        <div>
+                            <div style="color:#64748b;font-size:13px">کارت به کارت</div>
+                            <div style="font-size:32px;font-weight:900;color:#d97706;margin-top:6px"><?php echo count($orders_c2c); ?></div>
+                        </div>
+                        <div style="background:#fef3c7;width:44px;height:44px;border-radius:12px;display:flex;align-items:center;justify-content:center"><span class="dashicons dashicons-clock" style="color:#d97706"></span></div>
+                    </div>
+                    <a href="<?php echo admin_url('admin.php?page=fcui-card2card-orders'); ?>" style="display:inline-block;margin-top:14px;color:#1e6bff;text-decoration:none;font-weight:700;font-size:13px">مدیریت ←</a>
+                </div>
+                
+                <div style="background:#fff;border:1px solid #e2e8f0;border-radius:20px;padding:24px;box-shadow:0 4px 12px rgba(0,0,0,.04)">
+                    <div style="display:flex;justify-content:space-between">
+                        <div>
+                            <div style="color:#64748b;font-size:13px">کمپین فعال</div>
+                            <div style="font-size:32px;font-weight:900;color:#dc2626;margin-top:6px"><?php echo $campaigns_active; ?></div>
+                        </div>
+                        <div style="background:#fee2e2;width:44px;height:44px;border-radius:12px;display:flex;align-items:center;justify-content:center"><span class="dashicons dashicons-megaphone" style="color:#dc2626"></span></div>
+                    </div>
+                    <div style="font-size:12px;color:#64748b;margin-top:8px">محصولات با تایمر</div>
+                </div>
+                
+                <div style="background:#fff;border:1px solid #e2e8f0;border-radius:20px;padding:24px;box-shadow:0 4px 12px rgba(0,0,0,.04)">
+                    <div style="display:flex;justify-content:space-between">
+                        <div>
+                            <div style="color:#64748b;font-size:13px">کل پرداخت سریع</div>
+                            <div style="font-size:32px;font-weight:900;color:#0f172a;margin-top:6px"><?php echo count($orders_fast); ?></div>
+                        </div>
+                        <div style="background:#dbeafe;width:44px;height:44px;border-radius:12px;display:flex;align-items:center;justify-content:center"><span class="dashicons dashicons-yes-alt" style="color:#1e6bff"></span></div>
+                    </div>
+                </div>
+                
+                <div style="background:linear-gradient(135deg,#0f172a,#1e293b);color:#fff;border-radius:20px;padding:24px;box-shadow:0 10px 30px rgba(15,23,42,.25)">
+                    <div style="font-size:16px;font-weight:900;margin-bottom:8px">شروع سریع</div>
+                    <div style="opacity:.8;font-size:13px;line-height:1.6;margin-bottom:14px">کمپین بساز، تم بانک رو انتخاب کن</div>
+                    <a href="<?php echo admin_url('admin.php?page=fcui-settings'); ?>" style="background:#fff;color:#0f172a;padding:8px 14px;border-radius:10px;text-decoration:none;font-weight:800;font-size:13px;display:inline-block">تنظیمات</a>
+                </div>
+            </div>
+            
+            <div style="margin-top:30px;background:#fff;border:1px solid #e2e8f0;border-radius:20px;padding:24px">
+                <h3 style="margin:0 0 16px">لینک‌های مفید</h3>
+                <div style="display:flex;gap:12px;flex-wrap:wrap">
+                    <a href="<?php echo esc_url(get_permalink(get_option(self::OPT_FAST_PAGE_ID))); ?>" target="_blank" style="padding:10px 16px;background:#f8fafc;border:1px solid #e2e8f0;border-radius:12px;text-decoration:none;color:#0f172a;font-weight:700">صفحه پرداخت سریع</a>
+                    <a href="<?php echo admin_url('edit.php?post_type=product'); ?>" style="padding:10px 16px;background:#f8fafc;border:1px solid #e2e8f0;border-radius:12px;text-decoration:none;color:#0f172a;font-weight:700">مدیریت محصولات</a>
+                    <a href="<?php echo admin_url('admin.php?page=wc-orders'); ?>" style="padding:10px 16px;background:#f8fafc;border:1px solid #e2e8f0;border-radius:12px;text-decoration:none;color:#0f172a;font-weight:700">همه سفارشات</a>
                 </div>
             </div>
         </div>
@@ -934,157 +1090,245 @@ final class FCUI_Fast_Checkout {
         if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['fcui_save'])) {
             check_admin_referer('fcui_save_settings');
             
-            // ذخیره همه تنظیمات
-            foreach (self::default_settings() as $key => $default) {
-                if (isset($_POST[$key])) {
-                    if (is_array($_POST[$key])) {
-                        $s[$key] = array_map('sanitize_text_field', $_POST[$key]);
-                    } else {
-                        $s[$key] = sanitize_text_field($_POST[$key]);
+            // ذخیره بر اساس تب - رفع باگ
+            $new_settings = $s;
+            
+            if ($tab === 'general') {
+                $new_settings['require_login'] = isset($_POST['require_login']) ? 1 : 0;
+                $new_settings['apply_mode'] = sanitize_text_field($_POST['apply_mode'] ?? 'all');
+                $new_settings['coupon_enabled'] = isset($_POST['coupon_enabled']) ? 1 : 0;
+                $new_settings['coupon_label'] = sanitize_text_field($_POST['coupon_label'] ?? '');
+                $new_settings['coupon_placeholder'] = sanitize_text_field($_POST['coupon_placeholder'] ?? '');
+            }
+            
+            if ($tab === 'appearance') {
+                $new_settings['primary_color'] = sanitize_hex_color($_POST['primary_color'] ?? '#1e6bff');
+                $new_settings['secondary_color'] = sanitize_hex_color($_POST['secondary_color'] ?? '#0f172a');
+                $new_settings['background_color'] = sanitize_hex_color($_POST['background_color'] ?? '#f5f8ff');
+                $new_settings['card_radius'] = absint($_POST['card_radius'] ?? 16);
+                $new_settings['button_radius'] = absint($_POST['button_radius'] ?? 16);
+                $new_settings['button_pay_text'] = sanitize_text_field($_POST['button_pay_text'] ?? '');
+                $new_settings['button_later_text'] = sanitize_text_field($_POST['button_later_text'] ?? '');
+                $new_settings['button_free_text'] = sanitize_text_field($_POST['button_free_text'] ?? '');
+                $new_settings['hint_text'] = sanitize_text_field($_POST['hint_text'] ?? '');
+            }
+            
+            if ($tab === 'physical') {
+                $new_settings['physical_enabled'] = isset($_POST['physical_enabled']) ? 1 : 0;
+                $new_settings['physical_fields'] = isset($_POST['physical_fields']) ? array_map('sanitize_text_field', $_POST['physical_fields']) : [];
+                $new_settings['enable_national_code'] = isset($_POST['enable_national_code']) ? 1 : 0;
+                $new_settings['national_code_required'] = isset($_POST['national_code_required']) ? 1 : 0;
+                $new_settings['national_code_label'] = sanitize_text_field($_POST['national_code_label'] ?? 'کد ملی');
+                
+                if (isset($_POST['custom_fields'])) {
+                    $custom = [];
+                    foreach ($_POST['custom_fields'] as $cf) {
+                        if (!empty($cf['key']) && !empty($cf['label'])) {
+                            $custom[] = [
+                                'key' => sanitize_key($cf['key']),
+                                'label' => sanitize_text_field($cf['label']),
+                                'required' => !empty($cf['required']) ? 1 : 0,
+                                'active' => !empty($cf['active']) ? 1 : 0,
+                                'order' => (int)$cf['order'],
+                            ];
+                        }
                     }
-                } else {
-                    if (is_numeric($default) || is_bool($default)) $s[$key] = 0;
+                    $new_settings['custom_fields'] = $custom;
                 }
             }
             
-            // فیلدهای سفارشی
-            if (isset($_POST['custom_fields'])) {
-                $custom = [];
-                foreach ($_POST['custom_fields'] as $cf) {
-                    if (!empty($cf['key']) && !empty($cf['label'])) {
-                        $custom[] = [
-                            'key' => sanitize_key($cf['key']),
-                            'label' => sanitize_text_field($cf['label']),
-                            'required' => !empty($cf['required']) ? 1 : 0,
-                            'active' => !empty($cf['active']) ? 1 : 0,
-                            'order' => (int)$cf['order'],
-                        ];
-                    }
-                }
-                $s['custom_fields'] = $custom;
+            if ($tab === 'card2card') {
+                $new_settings['c2c_enabled'] = isset($_POST['c2c_enabled']) ? 1 : 0;
+                $new_settings['c2c_card_number'] = sanitize_text_field($_POST['c2c_card_number'] ?? '');
+                $new_settings['c2c_holder_name'] = sanitize_text_field($_POST['c2c_holder_name'] ?? '');
+                $new_settings['c2c_bank_name'] = sanitize_text_field($_POST['c2c_bank_name'] ?? '');
+                $new_settings['c2c_theme'] = sanitize_key($_POST['c2c_theme'] ?? 'melli');
+                $new_settings['c2c_timer_minutes'] = absint($_POST['c2c_timer_minutes'] ?? 20);
+                $new_settings['c2c_max_mb'] = absint($_POST['c2c_max_mb'] ?? 3);
             }
             
-            self::save_settings($s);
-            echo '<div class="notice notice-success is-dismissible"><p>✅ تنظیمات با موفقیت ذخیره شد</p></div>';
+            if ($tab === 'messages') {
+                $new_settings['success_page_title'] = sanitize_text_field($_POST['success_page_title'] ?? '');
+                $new_settings['success_page_online_message'] = sanitize_textarea_field($_POST['success_page_online_message'] ?? '');
+                $new_settings['success_page_c2c_message'] = sanitize_textarea_field($_POST['success_page_c2c_message'] ?? '');
+                $new_settings['course_access_link'] = esc_url_raw($_POST['course_access_link'] ?? '');
+            }
+            
+            self::save_settings($new_settings);
+            $s = $new_settings;
+            echo '<div class="notice notice-success is-dismissible" style="border-right:4px solid #16a34a"><p>✅ تنظیمات با موفقیت ذخیره شد - نسخه '.self::VERSION.'</p></div>';
         }
+        
+        $tabs = [
+            'general' => ['label' => 'عمومی', 'icon' => 'admin-generic'],
+            'appearance' => ['label' => 'ظاهر', 'icon' => 'art'],
+            'physical' => ['label' => 'فیزیکی', 'icon' => 'location'],
+            'card2card' => ['label' => 'کارت بانکی', 'icon' => 'bank'],
+            'messages' => ['label' => 'پیام‌ها', 'icon' => 'format-chat'],
+        ];
         ?>
         <div class="wrap fcui-admin" style="direction:rtl">
-            <h1>تنظیمات پرداخت سریع</h1>
+            <h1 style="display:flex;align-items:center;gap:10px">
+                <span class="dashicons dashicons-admin-settings" style="color:#1e6bff"></span>
+                تنظیمات پرداخت سریع
+                <span style="background:linear-gradient(135deg,#1e6bff,#0ea5e9);color:#fff;padding:3px 10px;border-radius:8px;font-size:11px;font-weight:800">PRO v2.2</span>
+            </h1>
             
-            <h2 class="nav-tab-wrapper" style="margin-top:20px">
-                <a href="?page=fcui-settings&tab=general" class="nav-tab <?php echo $tab=='general'?'nav-tab-active':''; ?>">عمومی</a>
-                <a href="?page=fcui-settings&tab=appearance" class="nav-tab <?php echo $tab=='appearance'?'nav-tab-active':''; ?>">ظاهر و استایل</a>
-                <a href="?page=fcui-settings&tab=physical" class="nav-tab <?php echo $tab=='physical'?'nav-tab-active':''; ?>">محصولات فیزیکی</a>
-                <a href="?page=fcui-settings&tab=card2card" class="nav-tab <?php echo $tab=='card2card'?'nav-tab-active':''; ?>">کارت به کارت</a>
-                <a href="?page=fcui-settings&tab=messages" class="nav-tab <?php echo $tab=='messages'?'nav-tab-active':''; ?>">پیام‌ها</a>
-            </h2>
-            
-            <form method="post" style="background:#fff;padding:24px;border:1px solid #e2e8f0;border-top:0;border-radius:0 0 12px 12px;max-width:900px">
-                <?php wp_nonce_field('fcui_save_settings'); ?>
-                
-                <?php if ($tab === 'general'): ?>
-                <table class="form-table">
-                    <tr><th>اجبار به ورود</th><td><label><input type="checkbox" name="require_login" value="1" <?php checked($s['require_login'],1); ?>> فقط کاربران وارد شده</label></td></tr>
-                    <tr><th>حالت اعمال</th><td>
-                        <label><input type="radio" name="apply_mode" value="all" <?php checked($s['apply_mode'],'all'); ?>> همه محصولات</label><br>
-                        <label><input type="radio" name="apply_mode" value="digital" <?php checked($s['apply_mode'],'digital'); ?>> فقط دیجیتال</label>
-                    </td></tr>
-                    <tr><th>کد تخفیف</th><td>
-                        <label><input type="checkbox" name="coupon_enabled" value="1" <?php checked($s['coupon_enabled'],1); ?>> فعال باشد</label><br><br>
-                        <input type="text" name="coupon_label" value="<?php echo esc_attr($s['coupon_label']); ?>" class="regular-text" placeholder="متن لیبل">
-                    </td></tr>
-                </table>
-                <?php endif; ?>
-                
-                <?php if ($tab === 'appearance'): ?>
-                <table class="form-table">
-                    <tr><th>رنگ اصلی</th><td><input type="text" name="primary_color" value="<?php echo esc_attr($s['primary_color']); ?>" class="fcui-color"></td></tr>
-                    <tr><th>رنگ پس‌زمینه</th><td><input type="text" name="background_color" value="<?php echo esc_attr($s['background_color']); ?>" class="fcui-color"></td></tr>
-                    <tr><th>گردی کارت‌ها</th><td><input type="number" name="card_radius" value="<?php echo (int)$s['card_radius']; ?>" min="0" max="30"> پیکسل</td></tr>
-                    <tr><th>متن دکمه پرداخت</th><td><input type="text" name="button_pay_text" value="<?php echo esc_attr($s['button_pay_text']); ?>" class="regular-text"></td></tr>
-                    <tr><th>متن دکمه بعداً</th><td><input type="text" name="button_later_text" value="<?php echo esc_attr($s['button_later_text']); ?>" class="regular-text"></td></tr>
-                    <tr><th>متن راهنما</th><td><input type="text" name="hint_text" value="<?php echo esc_attr($s['hint_text']); ?>" class="large-text"></td></tr>
-                </table>
-                <?php endif; ?>
-                
-                <?php if ($tab === 'physical'): ?>
-                <h3>فیلدهای محصولات فیزیکی</h3>
-                <p>فیلدهای زیر در صفحه پرداخت محصولات فیزیکی نمایش داده می‌شود:</p>
-                <table class="form-table">
-                    <tr><th>فعال‌سازی</th><td><label><input type="checkbox" name="physical_enabled" value="1" <?php checked($s['physical_enabled'],1); ?>> پرداخت سریع برای فیزیکی فعال باشد</label></td></tr>
-                    <tr><th>فیلدها</th><td>
-                        <?php $fields = ['billing_state'=>'استان','billing_city'=>'شهر','billing_address_1'=>'آدرس','billing_postcode'=>'کد پستی']; 
-                        foreach ($fields as $k=>$l): ?>
-                        <label style="display:block;margin:5px 0"><input type="checkbox" name="physical_fields[]" value="<?php echo $k; ?>" <?php checked(in_array($k,(array)$s['physical_fields'])); ?>> <?php echo $l; ?></label>
+            <div style="display:flex;gap:20px;margin-top:24px;align-items:flex-start">
+                <div style="width:220px;flex-shrink:0">
+                    <div style="background:#fff;border:1px solid #e2e8f0;border-radius:16px;padding:8px;position:sticky;top:32px">
+                        <?php foreach ($tabs as $key => $t): ?>
+                        <a href="?page=fcui-settings&tab=<?php echo $key; ?>" style="display:flex;align-items:center;gap:10px;padding:12px 14px;border-radius:10px;text-decoration:none;margin-bottom:4px;<?php echo $tab==$key ? 'background:linear-gradient(135deg,#1e6bff,#0ea5e9);color:#fff;font-weight:800;box-shadow:0 4px 12px rgba(30,107,255,.25)' : 'color:#334155'; ?>">
+                            <span class="dashicons dashicons-<?php echo $t['icon']; ?>" style="<?php echo $tab==$key ? 'color:#fff' : 'color:#64748b'; ?>"></span>
+                            <?php echo $t['label']; ?>
+                        </a>
                         <?php endforeach; ?>
-                    </td></tr>
-                    <tr><th>کد ملی</th><td>
-                        <label><input type="checkbox" name="enable_national_code" value="1" <?php checked($s['enable_national_code'],1); ?>> نمایش کد ملی</label><br>
-                        <label><input type="checkbox" name="national_code_required" value="1" <?php checked($s['national_code_required'],1); ?>> اجباری باشد</label>
-                    </td></tr>
-                </table>
-                
-                <h3 style="margin-top:30px">فیلدهای سفارشی</h3>
-                <div id="fcui-custom-fields">
-                    <?php foreach ((array)$s['custom_fields'] as $i=>$cf): ?>
-                    <div style="background:#f8fafc;padding:12px;margin:8px 0;border-radius:8px;display:grid;grid-template-columns:120px 1fr 80px 80px 60px;gap:8px;align-items:center">
-                        <input type="text" name="custom_fields[<?php echo $i; ?>][key]" value="<?php echo esc_attr($cf['key']); ?>" placeholder="کلید انگلیسی">
-                        <input type="text" name="custom_fields[<?php echo $i; ?>][label]" value="<?php echo esc_attr($cf['label']); ?>" placeholder="برچسب فارسی">
-                        <label><input type="checkbox" name="custom_fields[<?php echo $i; ?>][required]" value="1" <?php checked($cf['required'],1); ?>> اجباری</label>
-                        <label><input type="checkbox" name="custom_fields[<?php echo $i; ?>][active]" value="1" <?php checked($cf['active'],1); ?>> فعال</label>
-                        <input type="number" name="custom_fields[<?php echo $i; ?>][order]" value="<?php echo (int)$cf['order']; ?>" placeholder="ترتیب" style="width:60px">
                     </div>
-                    <?php endforeach; ?>
                 </div>
-                <button type="button" onclick="addCustomField()" class="button">+ افزودن فیلد</button>
-                <script>
-                let cfIndex = <?php echo count((array)$s['custom_fields']); ?>;
-                function addCustomField(){
-                    const div = document.createElement('div');
-                    div.style.cssText = 'background:#f8fafc;padding:12px;margin:8px 0;border-radius:8px;display:grid;grid-template-columns:120px 1fr 80px 80px 60px;gap:8px;align-items:center';
-                    div.innerHTML = `<input type="text" name="custom_fields[${cfIndex}][key]" placeholder="کلید انگلیسی"><input type="text" name="custom_fields[${cfIndex}][label]" placeholder="برچسب فارسی"><label><input type="checkbox" name="custom_fields[${cfIndex}][required]" value="1"> اجباری</label><label><input type="checkbox" name="custom_fields[${cfIndex}][active]" value="1" checked> فعال</label><input type="number" name="custom_fields[${cfIndex}][order]" value="${cfIndex}" style="width:60px">`;
-                    document.getElementById('fcui-custom-fields').appendChild(div);
-                    cfIndex++;
-                }
-                </script>
-                <?php endif; ?>
                 
-                <?php if ($tab === 'card2card'): ?>
-                <table class="form-table">
-                    <tr><th>فعال</th><td><label><input type="checkbox" name="c2c_enabled" value="1" <?php checked($s['c2c_enabled'],1); ?>> فعال باشد</label></td></tr>
-                    <tr><th>شماره کارت</th><td><input type="text" name="c2c_card_number" value="<?php echo esc_attr($s['c2c_card_number']); ?>" class="regular-text" dir="ltr"></td></tr>
-                    <tr><th>نام صاحب کارت</th><td><input type="text" name="c2c_holder_name" value="<?php echo esc_attr($s['c2c_holder_name']); ?>" class="regular-text"></td></tr>
-                    <tr><th>نام بانک</th><td><input type="text" name="c2c_bank_name" value="<?php echo esc_attr($s['c2c_bank_name']); ?>" class="regular-text"></td></tr>
-                    <tr><th>تم</th><td>
-                        <select name="c2c_theme">
-                            <option value="blue" <?php selected($s['c2c_theme'],'blue'); ?>>آبی</option>
-                            <option value="red" <?php selected($s['c2c_theme'],'red'); ?>>قرمز</option>
-                            <option value="gold" <?php selected($s['c2c_theme'],'gold'); ?>>طلایی</option>
-                            <option value="dark" <?php selected($s['c2c_theme'],'dark'); ?>>مشکی</option>
-                        </select>
-                    </td></tr>
-                    <tr><th>تایمر (دقیقه)</th><td><input type="number" name="c2c_timer_minutes" value="<?php echo (int)$s['c2c_timer_minutes']; ?>" min="1"></td></tr>
-                </table>
-                <?php endif; ?>
-                
-                <?php if ($tab === 'messages'): ?>
-                <table class="form-table">
-                    <tr><th>عنوان موفقیت</th><td><input type="text" name="success_page_title" value="<?php echo esc_attr($s['success_page_title']); ?>" class="large-text"></td></tr>
-                    <tr><th>پیام آنلاین</th><td><textarea name="success_page_online_message" rows="3" class="large-text"><?php echo esc_textarea($s['success_page_online_message']); ?></textarea></td></tr>
-                    <tr><th>پیام کارت به کارت</th><td><textarea name="success_page_c2c_message" rows="3" class="large-text"><?php echo esc_textarea($s['success_page_c2c_message']); ?></textarea></td></tr>
-                    <tr><th>لینک دوره</th><td><input type="url" name="course_access_link" value="<?php echo esc_attr($s['course_access_link']); ?>" class="large-text" dir="ltr"></td></tr>
-                </table>
-                <?php endif; ?>
-                
-                <p style="margin-top:30px"><button class="button button-primary button-large" name="fcui_save" value="1">💾 ذخیره تنظیمات</button></p>
-            </form>
-            
-            <script>jQuery(document).ready(function($){$('.fcui-color').wpColorPicker();});</script>
+                <div style="flex:1;max-width:800px">
+                    <form method="post" style="background:#fff;border:1px solid #e2e8f0;border-radius:16px;padding:28px;box-shadow:0 4px 16px rgba(0,0,0,.04)">
+                        <?php wp_nonce_field('fcui_save_settings'); ?>
+                        <input type="hidden" name="fcui_tab" value="<?php echo esc_attr($tab); ?>">
+                        
+                        <?php if ($tab === 'general'): ?>
+                        <h2 style="margin-top:0;display:flex;align-items:center;gap:8px"><span class="dashicons dashicons-admin-generic"></span> تنظیمات عمومی</h2>
+                        
+                        <div style="display:grid;gap:20px;margin-top:24px">
+                            <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:14px;padding:18px">
+                                <label style="display:flex;align-items:center;justify-content:space-between;cursor:pointer">
+                                    <div>
+                                        <div style="font-weight:800;margin-bottom:4px">اجبار به ورود</div>
+                                        <div style="font-size:12px;color:#64748b">کاربران باید وارد حساب شوند</div>
+                                    </div>
+                                    <input type="checkbox" name="require_login" value="1" <?php checked($s['require_login'],1); ?> style="width:44px;height:24px">
+                                </label>
+                            </div>
+                            
+                            <div>
+                                <label style="font-weight:800;display:block;margin-bottom:10px">حالت اعمال</label>
+                                <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+                                    <label style="border:2px solid <?php echo $s['apply_mode']=='all'?'#1e6bff':'#e2e8f0'; ?>;border-radius:12px;padding:14px;cursor:pointer;background:<?php echo $s['apply_mode']=='all'?'#eff6ff':'#fff'; ?>">
+                                        <input type="radio" name="apply_mode" value="all" <?php checked($s['apply_mode'],'all'); ?> style="margin-left:8px"> همه محصولات
+                                    </label>
+                                    <label style="border:2px solid <?php echo $s['apply_mode']=='digital'?'#1e6bff':'#e2e8f0'; ?>;border-radius:12px;padding:14px;cursor:pointer;background:<?php echo $s['apply_mode']=='digital'?'#eff6ff':'#fff'; ?>">
+                                        <input type="radio" name="apply_mode" value="digital" <?php checked($s['apply_mode'],'digital'); ?> style="margin-left:8px"> فقط دیجیتال
+                                    </label>
+                                </div>
+                            </div>
+                            
+                            <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:14px;padding:18px">
+                                <label style="display:flex;align-items:center;justify-content:space-between;cursor:pointer;margin-bottom:12px">
+                                    <div style="font-weight:800">کد تخفیف</div>
+                                    <input type="checkbox" name="coupon_enabled" value="1" <?php checked($s['coupon_enabled'],1); ?>>
+                                </label>
+                                <input type="text" name="coupon_label" value="<?php echo esc_attr($s['coupon_label']); ?>" placeholder="متن لیبل" style="width:100%;padding:10px;border:1px solid #cbd5e1;border-radius:10px;margin-bottom:8px">
+                                <input type="text" name="coupon_placeholder" value="<?php echo esc_attr($s['coupon_placeholder']); ?>" placeholder="متن placeholder" style="width:100%;padding:10px;border:1px solid #cbd5e1;border-radius:10px">
+                            </div>
+                        </div>
+                        <?php endif; ?>
+                        
+                        <?php if ($tab === 'appearance'): ?>
+                        <h2 style="margin-top:0;display:flex;align-items:center;gap:8px"><span class="dashicons dashicons-art"></span> ظاهر و استایل</h2>
+                        <div style="display:grid;grid-template-columns:1fr 1fr;gap:18px;margin-top:24px">
+                            <div><label style="font-weight:700;display:block;margin-bottom:6px">رنگ اصلی</label><input type="text" name="primary_color" value="<?php echo esc_attr($s['primary_color']); ?>" class="fcui-color" data-default-color="#1e6bff"></div>
+                            <div><label style="font-weight:700;display:block;margin-bottom:6px">رنگ ثانویه</label><input type="text" name="secondary_color" value="<?php echo esc_attr($s['secondary_color']); ?>" class="fcui-color"></div>
+                            <div><label style="font-weight:700;display:block;margin-bottom:6px">پس‌زمینه</label><input type="text" name="background_color" value="<?php echo esc_attr($s['background_color']); ?>" class="fcui-color"></div>
+                            <div></div>
+                            <div><label style="font-weight:700;display:block;margin-bottom:6px">گردی کارت (px)</label><input type="number" name="card_radius" value="<?php echo (int)$s['card_radius']; ?>" min="0" max="30" style="width:100%;padding:10px;border:1px solid #cbd5e1;border-radius:10px"></div>
+                            <div><label style="font-weight:700;display:block;margin-bottom:6px">گردی دکمه (px)</label><input type="number" name="button_radius" value="<?php echo (int)$s['button_radius']; ?>" min="0" max="30" style="width:100%;padding:10px;border:1px solid #cbd5e1;border-radius:10px"></div>
+                        </div>
+                        <div style="margin-top:20px;display:grid;gap:12px">
+                            <input type="text" name="button_pay_text" value="<?php echo esc_attr($s['button_pay_text']); ?>" placeholder="متن دکمه پرداخت" style="width:100%;padding:12px;border:1px solid #cbd5e1;border-radius:10px;font-weight:700">
+                            <input type="text" name="button_later_text" value="<?php echo esc_attr($s['button_later_text']); ?>" placeholder="متن دکمه بعدا" style="width:100%;padding:12px;border:1px solid #cbd5e1;border-radius:10px">
+                            <input type="text" name="button_free_text" value="<?php echo esc_attr($s['button_free_text']); ?>" placeholder="متن ثبت نام رایگان" style="width:100%;padding:12px;border:1px solid #cbd5e1;border-radius:10px">
+                            <input type="text" name="hint_text" value="<?php echo esc_attr($s['hint_text']); ?>" placeholder="متن راهنما" style="width:100%;padding:12px;border:1px solid #cbd5e1;border-radius:10px">
+                        </div>
+                        <?php endif; ?>
+                        
+                        <?php if ($tab === 'physical'): ?>
+                        <h2 style="margin-top:0">محصولات فیزیکی</h2>
+                        <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:14px;padding:18px;margin:20px 0">
+                            <label><input type="checkbox" name="physical_enabled" value="1" <?php checked($s['physical_enabled'],1); ?>> فعال‌سازی پرداخت سریع برای محصولات فیزیکی</label>
+                        </div>
+                        <h3>فیلدهای آدرس</h3>
+                        <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+                            <?php $fields = ['billing_state'=>'استان','billing_city'=>'شهر','billing_address_1'=>'آدرس کامل','billing_postcode'=>'کد پستی']; 
+                            foreach ($fields as $k=>$l): ?>
+                            <label style="background:#fff;border:1px solid #e2e8f0;padding:12px;border-radius:10px"><input type="checkbox" name="physical_fields[]" value="<?php echo $k; ?>" <?php checked(in_array($k,(array)$s['physical_fields'])); ?>> <?php echo $l; ?></label>
+                            <?php endforeach; ?>
+                        </div>
+                        <div style="margin-top:20px;background:#f8fafc;padding:16px;border-radius:12px">
+                            <label><input type="checkbox" name="enable_national_code" value="1" <?php checked($s['enable_national_code'],1); ?>> نمایش کد ملی</label>
+                            <label style="margin-right:20px"><input type="checkbox" name="national_code_required" value="1" <?php checked($s['national_code_required'],1); ?>> اجباری</label>
+                            <input type="text" name="national_code_label" value="<?php echo esc_attr($s['national_code_label']); ?>" style="margin-top:8px;padding:8px;border:1px solid #cbd5e1;border-radius:8px">
+                        </div>
+                        <?php endif; ?>
+                        
+                        <?php if ($tab === 'card2card'): ?>
+                        <h2 style="margin-top:0;display:flex;align-items:center;gap:8px"><span class="dashicons dashicons-bank"></span> کارت به کارت - بانک‌های ایرانی</h2>
+                        <div style="margin-top:20px">
+                            <label style="display:flex;align-items:center;gap:10px;margin-bottom:16px"><input type="checkbox" name="c2c_enabled" value="1" <?php checked($s['c2c_enabled'],1); ?>> فعال باشد</label>
+                            
+                            <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px">
+                                <div><label>شماره کارت</label><input type="text" name="c2c_card_number" value="<?php echo esc_attr($s['c2c_card_number']); ?>" dir="ltr" style="width:100%;padding:10px;border:1px solid #cbd5e1;border-radius:10px;font-family:monospace"></div>
+                                <div><label>نام صاحب کارت</label><input type="text" name="c2c_holder_name" value="<?php echo esc_attr($s['c2c_holder_name']); ?>" style="width:100%;padding:10px;border:1px solid #cbd5e1;border-radius:10px"></div>
+                            </div>
+                            
+                            <div style="margin-top:16px">
+                                <label style="font-weight:800;display:block;margin-bottom:10px">انتخاب تم بانک</label>
+                                <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:10px">
+                                    <?php 
+                                    $banks = [
+                                        'melli' => ['بانک ملی', '#00a95c'],
+                                        'mellat' => ['بانک ملت', '#d81e05'],
+                                        'saderat' => ['صادرات', '#004e92'],
+                                        'keshavarzi' => ['کشاورزی', '#4caf50'],
+                                        'tejarat' => ['تجارت', '#0054a6'],
+                                        'pasargad' => ['پاسارگاد', '#fdb813'],
+                                        'blubank' => ['بلوبانک', '#0099ff'],
+                                        'sepah' => ['سپه', '#8b4513'],
+                                    ];
+                                    foreach ($banks as $key => $b): ?>
+                                    <label style="border:3px solid <?php echo $s['c2c_theme']==$key?'#1e6bff':'#e2e8f0'; ?>;border-radius:12px;padding:10px;text-align:center;cursor:pointer;background:<?php echo $b[1]; ?>;color:#fff;position:relative">
+                                        <input type="radio" name="c2c_theme" value="<?php echo $key; ?>" <?php checked($s['c2c_theme'],$key); ?> style="position:absolute;opacity:0">
+                                        <div style="font-weight:900;font-size:12px"><?php echo $b[0]; ?></div>
+                                    </label>
+                                    <?php endforeach; ?>
+                                </div>
+                            </div>
+                            
+                            <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-top:16px">
+                                <div><label>تایمر (دقیقه)</label><input type="number" name="c2c_timer_minutes" value="<?php echo (int)$s['c2c_timer_minutes']; ?>" style="width:100%;padding:10px;border:1px solid #cbd5e1;border-radius:10px"></div>
+                                <div><label>حداکثر حجم (MB)</label><input type="number" name="c2c_max_mb" value="<?php echo (int)$s['c2c_max_mb']; ?>" style="width:100%;padding:10px;border:1px solid #cbd5e1;border-radius:10px"></div>
+                            </div>
+                        </div>
+                        <?php endif; ?>
+                        
+                        <?php if ($tab === 'messages'): ?>
+                        <h2>پیام‌ها</h2>
+                        <div style="display:grid;gap:14px;margin-top:20px">
+                            <input type="text" name="success_page_title" value="<?php echo esc_attr($s['success_page_title']); ?>" placeholder="عنوان صفحه موفقیت" style="padding:12px;border:1px solid #cbd5e1;border-radius:10px">
+                            <textarea name="success_page_online_message" rows="3" placeholder="پیام پرداخت آنلاین" style="padding:12px;border:1px solid #cbd5e1;border-radius:10px"><?php echo esc_textarea($s['success_page_online_message']); ?></textarea>
+                            <textarea name="success_page_c2c_message" rows="3" placeholder="پیام کارت به کارت" style="padding:12px;border:1px solid #cbd5e1;border-radius:10px"><?php echo esc_textarea($s['success_page_c2c_message']); ?></textarea>
+                            <input type="url" name="course_access_link" value="<?php echo esc_attr($s['course_access_link']); ?>" placeholder="لینک دسترسی به دوره" dir="ltr" style="padding:12px;border:1px solid #cbd5e1;border-radius:10px">
+                        </div>
+                        <?php endif; ?>
+                        
+                        <div style="margin-top:30px;padding-top:20px;border-top:1px solid #e2e8f0;display:flex;justify-content:space-between;align-items:center">
+                            <div style="font-size:12px;color:#64748b">تغییرات در تب «<?php echo $tabs[$tab]['label']; ?>» ذخیره می‌شود</div>
+                            <button class="button button-primary" name="fcui_save" value="1" style="padding:10px 24px;height:auto;font-size:14px;font-weight:800;background:linear-gradient(135deg,#1e6bff,#0ea5e9);border:0;border-radius:10px;box-shadow:0 4px 12px rgba(30,107,255,.3)">💾 ذخیره تنظیمات</button>
+                        </div>
+                    </form>
+                </div>
+            </div>
+            <script>jQuery(document).ready(function($){$('.fcui-color').wpColorPicker({change:function(){}});});</script>
         </div>
         <?php
     }
 
     public static function admin_card2card_orders_page() {
+        // ... (same as before, omitted for brevity - keep original)
         if (!current_user_can('manage_woocommerce')) return;
         $s = self::get_settings();
 
@@ -1145,32 +1389,16 @@ final class FCUI_Fast_Checkout {
     public static function admin_tutorial_page() {
         ?>
         <div class="wrap" style="direction:rtl;max-width:900px">
-            <h1>📚 آموزش پرداخت سریع</h1>
-            
+            <h1>📚 آموزش پرداخت سریع v2.2</h1>
             <div style="background:#fff;border:1px solid #e2e8f0;border-radius:16px;padding:30px;margin-top:20px">
-                <h2 style="color:#1e6bff">🎯 معرفی افزونه</h2>
-                <p style="line-height:2;font-size:15px">پرداخت سریع، فرآیند خرید ووکامرس را به یک صفحه ساده و بدون اسکرول تبدیل می‌کند. مشتری با یک کلیک وارد صفحه پرداخت می‌شود، اطلاعاتش را وارد می‌کند و پرداخت می‌کند.</p>
-                
-                <h3 style="margin-top:30px">✨ ویژگی‌های کلیدی</h3>
+                <h2 style="color:#1e6bff">🎯 ویژگی‌های جدید</h2>
                 <ul style="line-height:2.2">
-                    <li>✅ <strong>پرداخت بدون اسکرول</strong> - طراحی شده برای موبایل</li>
-                    <li>✅ <strong>کد تخفیف</strong> - فیلد اختصاصی در صفحه پرداخت</li>
-                    <li>✅ <strong>محصولات فیزیکی</strong> - فیلد آدرس، کد پستی، کد ملی</li>
-                    <li>✅ <strong>کارت به کارت</strong> - آپلود رسید + تایید مدیر</li>
-                    <li>✅ <strong>شخصی‌سازی کامل</strong> - رنگ، متن، فیلدها</li>
+                    <li>✅ <strong>کمپین زماندار</strong> - در ویرایش محصول، قیمت و زمان شروع/پایان را تنظیم کنید</li>
+                    <li>✅ <strong>تایمر شمارش معکوس</strong> - در صفحه محصول و پرداخت نمایش داده می‌شود</li>
+                    <li>✅ <strong>تم‌های بانکی ایرانی</strong> - 8 بانک: ملی، ملت، صادرات، کشاورزی، تجارت، پاسارگاد، بلوبانک، سپه</li>
+                    <li>✅ <strong>داشبورد هوشمند</strong> - نرخ تبدیل، درآمد امروز، کمپین‌های فعال</li>
+                    <li>✅ <strong>تنظیمات گرافیکی</strong> - رابط کاربری جدید و مدرن</li>
                 </ul>
-                
-                <h3 style="margin-top:30px">🚀 راه‌اندازی</h3>
-                <ol style="line-height:2.2">
-                    <li>به <strong>تنظیمات > ظاهر</strong> بروید و رنگ برند خود را انتخاب کنید</li>
-                    <li>در تب <strong>محصولات فیزیکی</strong>، فیلدهای مورد نیاز را فعال کنید</li>
-                    <li>شماره کارت خود را در تب <strong>کارت به کارت</strong> وارد کنید</li>
-                    <li>صفحه پرداخت: <code><?php echo home_url('/fast-checkout/'); ?></code></li>
-                </ol>
-                
-                <div style="background:#f0f9ff;border-right:4px solid #0ea5e9;padding:16px;margin-top:30px;border-radius:8px">
-                    <strong>💡 نکته:</strong> برای محصولات دانلودی، فیلدها مینیمال است. برای فیزیکی، به صورت خودکار فیلد آدرس نمایش داده می‌شود.
-                </div>
             </div>
         </div>
         <?php
