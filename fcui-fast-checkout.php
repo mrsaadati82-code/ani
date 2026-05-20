@@ -1,72 +1,57 @@
 <?php
 /**
  * Plugin Name: پرداخت سریع - سلام وردپرس
- * Description: این پلاگین صفحه ی پرداخت سریع را جایگزین فرایند سفارش ووکامرس میکند.
- * Version: 2.0.0
+ * Description: این پلاگین صفحه ی پرداخت سریع را جایگزین فرایند سفارش ووکامرس میکند. نسخه پیشرفته با پشتیبانی محصولات فیزیکی، کد تخفیف و پنل مدیریت حرفه‌ای
+ * Version: 2.1.0
  * Author: امیرحسین سعادتی
+ * Text Domain: fcui
  */
 
 if (!defined('ABSPATH')) exit;
 
 final class FCUI_Fast_Checkout {
 
-    // ========== Options ==========
     const OPT_FAST_PAGE_ID = 'fcui_fast_checkout_page_id';
     const OPT_C2C_PAGE_ID  = 'fcui_card2card_page_id';
-
     const OPT_SETTINGS     = 'fcui_settings';
+    const VERSION = '2.1.0';
 
-    // Default slugs/titles
     const FAST_PAGE_TITLE = 'پرداخت سریع';
     const FAST_PAGE_SLUG  = 'fast-checkout';
-
     const C2C_PAGE_TITLE  = 'کارت به کارت';
     const C2C_PAGE_SLUG   = 'card-to-card';
 
     public static function init() {
         add_action('plugins_loaded', [__CLASS__, 'bootstrap']);
         register_activation_hook(__FILE__, [__CLASS__, 'activate']);
+        add_action('admin_enqueue_scripts', [__CLASS__, 'admin_assets']);
     }
 
     public static function bootstrap() {
         if (!class_exists('WooCommerce')) return;
 
-        // Gateway
         require_once __DIR__ . '/includes/class-fcui-gateway-card2card.php';
         add_filter('woocommerce_payment_gateways', [__CLASS__, 'register_gateway']);
 
-        // Standalone renders (no theme header/footer)
         add_action('template_redirect', [__CLASS__, 'render_standalone_fast_checkout'], 1);
         add_action('template_redirect', [__CLASS__, 'render_standalone_card2card'], 1);
-
-        // MyAccount redirect_to support
         add_action('template_redirect', [__CLASS__, 'maybe_redirect_from_myaccount'], 0);
+        
         add_filter('woocommerce_login_redirect', [__CLASS__, 'woocommerce_login_redirect'], 10, 2);
         add_filter('woocommerce_registration_redirect', [__CLASS__, 'woocommerce_registration_redirect'], 10, 1);
 
-        // Assets
         add_action('wp_enqueue_scripts', [__CLASS__, 'enqueue_assets']);
+        add_action('wp_head', [__CLASS__, 'output_dynamic_styles']);
 
-        // Product buy URL redirect (some themes)
         add_filter('woocommerce_product_add_to_cart_url', [__CLASS__, 'filter_add_to_cart_url'], 10, 2);
-
-        // Minimal checkout fields on our pages
         add_filter('woocommerce_checkout_fields', [__CLASS__, 'filter_checkout_fields'], 20);
         add_filter('woocommerce_cart_needs_shipping', [__CLASS__, 'disable_shipping_on_fast_pages'], 20);
         add_filter('woocommerce_enable_order_notes_field', [__CLASS__, 'disable_order_notes_on_fast_pages'], 20);
 
-        // Admin pages
         add_action('admin_menu', [__CLASS__, 'admin_menu']);
-		
-		//success page
-        add_action('init', function(){
-
-            add_rewrite_rule(
-                '^order-success/?$',
-                'index.php?fcui_order_success=1',
-                'top'
-            );
         
+        add_action('init', function(){
+            add_rewrite_rule('^order-success/?$', 'index.php?fcui_order_success=1', 'top');
         });
         
         add_filter('query_vars', function($vars){
@@ -75,22 +60,20 @@ final class FCUI_Fast_Checkout {
         });
         
         add_action('template_redirect', function(){
-        
             if (get_query_var('fcui_order_success')) {
-        
                 include plugin_dir_path(__FILE__) . 'templates/order-success-page.php';
                 exit;
-        
             }
-        
         });
 
-        // body class
         add_filter('body_class', [__CLASS__, 'body_class']);
+        
+        // Save custom fields
+        add_action('woocommerce_checkout_update_order_meta', [__CLASS__, 'save_custom_fields']);
+        add_action('woocommerce_admin_order_data_after_billing_address', [__CLASS__, 'display_custom_fields_admin']);
     }
 
     public static function activate() {
-        // Create fast checkout page
         $fast_id = (int) get_option(self::OPT_FAST_PAGE_ID);
         if (!$fast_id || !get_post($fast_id)) {
             $fast_id = wp_insert_post([
@@ -103,7 +86,6 @@ final class FCUI_Fast_Checkout {
             if (!is_wp_error($fast_id)) update_option(self::OPT_FAST_PAGE_ID, (int)$fast_id);
         }
 
-        // Create card-to-card page
         $c2c_id = (int) get_option(self::OPT_C2C_PAGE_ID);
         if (!$c2c_id || !get_post($c2c_id)) {
             $c2c_id = wp_insert_post([
@@ -116,39 +98,63 @@ final class FCUI_Fast_Checkout {
             if (!is_wp_error($c2c_id)) update_option(self::OPT_C2C_PAGE_ID, (int)$c2c_id);
         }
 
-        // Defaults
         $s = self::get_settings();
-        if (empty($s)) {
-            self::save_settings(self::default_settings());
+        if (empty($s['version']) || version_compare($s['version'], self::VERSION, '<')) {
+            self::save_settings(wp_parse_args($s, self::default_settings()));
         }
+        
+        flush_rewrite_rules();
     }
 
-    // ========== Settings ==========
     public static function default_settings() {
         return [
+            'version' => self::VERSION,
             'require_login' => 1,
-
-            // apply mode: all | digital
             'apply_mode' => 'all',
-
-            // card-to-card enabled
+            
+            // ظاهر
+            'primary_color' => '#1e6bff',
+            'secondary_color' => '#0f172a',
+            'background_color' => '#f5f8ff',
+            'card_radius' => '16',
+            'button_radius' => '16',
+            
+            // متون
+            'button_pay_text' => 'پرداخت و ثبت‌نام آنی',
+            'button_later_text' => 'بعداً پرداخت می‌کنم',
+            'button_free_text' => 'ثبت‌نام رایگان',
+            'hint_text' => 'بعد از پرداخت موفق، دسترسی شما همان لحظه فعال می‌شود.',
+            
+            // کد تخفیف
+            'coupon_enabled' => 1,
+            'coupon_label' => 'کد تخفیف دارید؟',
+            'coupon_placeholder' => 'کد را وارد کنید',
+            
+            // کارت به کارت
             'c2c_enabled' => 1,
-            'c2c_card_number' => '0000-0000-0000-0000',
-            'c2c_holder_name' => 'نام صاحب کارت',
-            'c2c_bank_name'   => 'بانک',
-            'c2c_theme'       => 'blue', // blue|red|gold|dark
-
+            'c2c_card_number' => '6037-9911-1234-5678',
+            'c2c_holder_name' => 'امیرحسین سعادتی',
+            'c2c_bank_name'   => 'بانک ملی',
+            'c2c_theme'       => 'blue',
             'c2c_timer_minutes' => 20,
-
-            // after approval: processing or completed
             'c2c_approved_status' => 'completed',
-
-            // upload limits
             'c2c_max_mb' => 3,
-            'success_page_title' => 'پرداخت موفق',
-'success_page_online_message' => 'پرداخت شما با موفقیت انجام شد و دسترسی دوره فعال شده است.',
-'success_page_c2c_message' => 'رسید شما ثبت شد و پس از بررسی دسترسی فعال خواهد شد.',
-'course_access_link' => '',
+            
+            // محصولات فیزیکی
+            'physical_enabled' => 1,
+            'physical_fields' => ['billing_state','billing_city','billing_address_1','billing_postcode'],
+            'enable_national_code' => 1,
+            'national_code_required' => 0,
+            'national_code_label' => 'کد ملی',
+            
+            // فیلدهای سفارشی
+            'custom_fields' => [],
+            
+            // صفحه موفقیت
+            'success_page_title' => 'پرداخت با موفقیت انجام شد',
+            'success_page_online_message' => 'پرداخت شما با موفقیت انجام شد و دسترسی دوره فعال شده است.',
+            'success_page_c2c_message' => 'رسید شما ثبت شد و پس از بررسی دسترسی فعال خواهد شد.',
+            'course_access_link' => '',
         ];
     }
 
@@ -159,10 +165,10 @@ final class FCUI_Fast_Checkout {
     }
 
     public static function save_settings($s) {
+        $s['version'] = self::VERSION;
         update_option(self::OPT_SETTINGS, $s);
     }
 
-    // ========== Pages ==========
     public static function is_fast_checkout_page() {
         $id = (int) get_option(self::OPT_FAST_PAGE_ID);
         return $id && is_page($id);
@@ -191,17 +197,14 @@ final class FCUI_Fast_Checkout {
         return $classes;
     }
 
-    // ========== Product targeting ==========
     public static function is_enabled_for_product($product_id) {
         $s = self::get_settings();
         $mode = isset($s['apply_mode']) ? $s['apply_mode'] : 'all';
         if ($mode === 'all') return true;
 
-        // digital mode
         $p = wc_get_product($product_id);
         if (!$p) return false;
 
-        // variable: check children
         if ($p->is_type('variable')) {
             $children = $p->get_children();
             if (is_array($children)) {
@@ -215,8 +218,14 @@ final class FCUI_Fast_Checkout {
 
         return ($p->is_downloadable() || $p->is_virtual());
     }
+    
+    public static function is_physical_product($product) {
+        if (!$product) return false;
+        $s = self::get_settings();
+        if (empty($s['physical_enabled'])) return false;
+        return !$product->is_virtual() && !$product->is_downloadable();
+    }
 
-    // ========== Login handling (MyAccount) ==========
     private static function get_myaccount_url() {
         $my = function_exists('wc_get_page_permalink') ? wc_get_page_permalink('myaccount') : home_url('/my-account/');
         if (!$my) $my = home_url('/my-account/');
@@ -225,10 +234,7 @@ final class FCUI_Fast_Checkout {
 
     public static function get_theme_login_url($redirect_url) {
         $my = self::get_myaccount_url();
-        return add_query_arg([
-            'redirect_to' => $redirect_url,
-            'redirect'    => $redirect_url,
-        ], $my);
+        return add_query_arg(['redirect_to' => $redirect_url, 'redirect' => $redirect_url], $my);
     }
 
     private static function get_requested_redirect_target() {
@@ -266,27 +272,18 @@ final class FCUI_Fast_Checkout {
         return $t ? $t : $redirect;
     }
 
-    // ========== Gateway ==========
     public static function register_gateway($methods) {
         $methods[] = 'FCUI_Gateway_Card2Card';
         return $methods;
     }
 
-    // ========== Assets ==========
     public static function enqueue_assets() {
         $s = self::get_settings();
 
         if (is_product()) {
             $pid = get_queried_object_id();
             $enabled = self::is_enabled_for_product($pid) ? 1 : 0;
-
-            wp_enqueue_script(
-                'fcui-product-redirect',
-                plugins_url('assets/product-redirect.js', __FILE__),
-                ['jquery'],
-                '2.0.0',
-                true
-            );
+            wp_enqueue_script('fcui-product-redirect', plugins_url('assets/product-redirect.js', __FILE__), ['jquery'], self::VERSION, true);
             wp_localize_script('fcui-product-redirect', 'FCUI_REDIRECT', [
                 'fast_url' => self::get_fast_checkout_url(),
                 'enabled_for_product' => $enabled,
@@ -295,74 +292,133 @@ final class FCUI_Fast_Checkout {
         }
 
         if (self::is_fast_checkout_page()) {
-            wp_enqueue_style(
-                'fcui-fast-checkout',
-                plugins_url('assets/fast-checkout.css', __FILE__),
-                [],
-                '2.0.0'
-            );
+            wp_enqueue_style('fcui-fast-checkout', plugins_url('assets/fast-checkout.css', __FILE__), [], self::VERSION);
+            wp_enqueue_script('fcui-checkout', plugins_url('assets/fast-checkout.js', __FILE__), ['jquery'], self::VERSION, true);
         }
 
         if (self::is_card2card_page()) {
-            wp_enqueue_style(
-                'fcui-card2card',
-                plugins_url('assets/card2card.css', __FILE__),
-                [],
-                '2.0.0'
-            );
-            wp_enqueue_script(
-                'fcui-card2card',
-                plugins_url('assets/card2card.js', __FILE__),
-                [],
-                '2.0.0',
-                true
-            );
+            wp_enqueue_style('fcui-card2card', plugins_url('assets/card2card.css', __FILE__), [], self::VERSION);
+            wp_enqueue_script('fcui-card2card', plugins_url('assets/card2card.js', __FILE__), [], self::VERSION, true);
         }
     }
+    
+    public static function output_dynamic_styles() {
+        if (!self::is_fast_checkout_page() && !self::is_card2card_page() && !get_query_var('fcui_order_success')) return;
+        
+        $s = self::get_settings();
+        ?>
+        <style id="fcui-dynamic">
+            :root{
+                --p: <?php echo esc_attr($s['primary_color']); ?>;
+                --s: <?php echo esc_attr($s['secondary_color']); ?>;
+                --bg: <?php echo esc_attr($s['background_color']); ?>;
+                --r: <?php echo (int)$s['card_radius']; ?>px;
+                --br: <?php echo (int)$s['button_radius']; ?>px;
+            }
+            body.fcui-fast-checkout, body.fcui-card2card { background: var(--bg) !important; }
+            .fcui__btn--primary, .fcui-c2c__submit { 
+                background: linear-gradient(135deg, var(--p) 0%, color-mix(in srgb, var(--p) 80%, black) 100%) !important;
+                border-radius: var(--br) !important;
+            }
+            .fcui__card, .fcui__summary, .fcui-c2c__upload { border-radius: var(--r) !important; }
+            .fcui__step { background: color-mix(in srgb, var(--p) 15%, white) !important; color: var(--p) !important; }
+        </style>
+        <?php
+    }
 
-    // ========== Filter add-to-cart URL ==========
+    public static function admin_assets($hook) {
+        if (strpos($hook, 'fcui') === false) return;
+        wp_enqueue_style('wp-color-picker');
+        wp_enqueue_script('wp-color-picker');
+        wp_enqueue_media();
+    }
+
     public static function filter_add_to_cart_url($url, $product) {
         if (!is_product()) return $url;
         $pid = $product ? $product->get_id() : 0;
         if (!$pid) return $url;
-
         if (!self::is_enabled_for_product($pid)) return $url;
-
         return self::get_fast_checkout_url(['product_id' => $pid]);
     }
 
-    // ========== Checkout fields ==========
     public static function filter_checkout_fields($fields) {
         if (!self::is_fast_checkout_page()) return $fields;
 
-        $keep = ['billing_first_name', 'billing_last_name', 'billing_phone', 'billing_email'];
+        $product_id = isset($_REQUEST['product_id']) ? absint($_REQUEST['product_id']) : 0;
+        $product = $product_id ? wc_get_product($product_id) : null;
+        $is_physical = self::is_physical_product($product);
+        $s = self::get_settings();
 
-        if (isset($fields['billing']) && is_array($fields['billing'])) {
-            foreach ($fields['billing'] as $key => $field) {
-                if (!in_array($key, $keep, true)) unset($fields['billing'][$key]);
+        if ($is_physical) {
+            // محصولات فیزیکی - فیلدهای انتخابی
+            $keep = ['billing_first_name', 'billing_last_name', 'billing_phone', 'billing_email'];
+            if (!empty($s['physical_fields'])) {
+                $keep = array_merge($keep, $s['physical_fields']);
             }
-            if (isset($fields['billing']['billing_first_name'])) $fields['billing']['billing_first_name']['required'] = true;
-            if (isset($fields['billing']['billing_last_name']))  $fields['billing']['billing_last_name']['required']  = true;
-            if (isset($fields['billing']['billing_phone']))      $fields['billing']['billing_phone']['required']      = true;
-            if (isset($fields['billing']['billing_email']))      $fields['billing']['billing_email']['required']      = false;
+            
+            if (isset($fields['billing'])) {
+                foreach ($fields['billing'] as $key => $field) {
+                    if (!in_array($key, $keep, true)) {
+                        unset($fields['billing'][$key]);
+                    }
+                }
+            }
+            
+            // کد ملی
+            if (!empty($s['enable_national_code'])) {
+                $fields['billing']['billing_national_code'] = [
+                    'label' => $s['national_code_label'],
+                    'required' => !empty($s['national_code_required']),
+                    'priority' => 35,
+                    'class' => ['form-row-first'],
+                ];
+            }
+            
+            // فیلدهای سفارشی
+            if (!empty($s['custom_fields'])) {
+                foreach ($s['custom_fields'] as $cf) {
+                    if (empty($cf['key']) || empty($cf['active'])) continue;
+                    $fields['billing']['billing_'.$cf['key']] = [
+                        'label' => $cf['label'],
+                        'required' => !empty($cf['required']),
+                        'priority' => 100 + (int)$cf['order'],
+                        'class' => ['form-row-wide'],
+                    ];
+                }
+            }
+            
+            return $fields;
+        } else {
+            // محصولات دیجیتال - مینیمال
+            $keep = ['billing_first_name', 'billing_last_name', 'billing_phone', 'billing_email'];
+            if (isset($fields['billing']) && is_array($fields['billing'])) {
+                foreach ($fields['billing'] as $key => $field) {
+                    if (!in_array($key, $keep, true)) unset($fields['billing'][$key]);
+                }
+                if (isset($fields['billing']['billing_first_name'])) $fields['billing']['billing_first_name']['required'] = true;
+                if (isset($fields['billing']['billing_last_name']))  $fields['billing']['billing_last_name']['required']  = true;
+                if (isset($fields['billing']['billing_phone']))      $fields['billing']['billing_phone']['required']      = true;
+                if (isset($fields['billing']['billing_email']))      $fields['billing']['billing_email']['required']      = false;
+            }
+            $fields['shipping'] = [];
+            return $fields;
         }
-
-        $fields['shipping'] = [];
-        return $fields;
     }
 
     public static function disable_shipping_on_fast_pages($needs_shipping) {
-        return (self::is_fast_checkout_page() || self::is_card2card_page()) ? false : $needs_shipping;
+        if (!self::is_fast_checkout_page()) return $needs_shipping;
+        $product_id = isset($_REQUEST['product_id']) ? absint($_REQUEST['product_id']) : 0;
+        $product = $product_id ? wc_get_product($product_id) : null;
+        return self::is_physical_product($product) ? true : false;
     }
 
     public static function disable_order_notes_on_fast_pages($enabled) {
         return (self::is_fast_checkout_page() || self::is_card2card_page()) ? false : $enabled;
     }
 
-    // ========== Prefill ==========
     private static function get_user_prefill() {
         if (!is_user_logged_in()) {
-            return ['full_name'=>'','phone'=>'','email'=>''];
+            return ['full_name'=>'','phone'=>'','email'=>'','address'=>'','city'=>'','postcode'=>'','state'=>''];
         }
 
         $user_id = get_current_user_id();
@@ -379,8 +435,7 @@ final class FCUI_Fast_Checkout {
 
         $phone = $customer->get_billing_phone();
         if (!$phone) {
-            $fallback_keys = ['billing_phone', 'digits_phone', 'mobile', 'user_mobile', 'phone'];
-            foreach ($fallback_keys as $k) {
+            foreach (['billing_phone', 'digits_phone', 'mobile', 'user_mobile', 'phone'] as $k) {
                 $val = get_user_meta($user_id, $k, true);
                 if (!empty($val)) { $phone = $val; break; }
             }
@@ -393,6 +448,10 @@ final class FCUI_Fast_Checkout {
             'full_name' => $full ? $full : '',
             'phone'     => $phone ? $phone : '',
             'email'     => $email ? $email : '',
+            'address'   => $customer->get_billing_address_1(),
+            'city'      => $customer->get_billing_city(),
+            'postcode'  => $customer->get_billing_postcode(),
+            'state'     => $customer->get_billing_state(),
         ];
     }
 
@@ -407,22 +466,22 @@ final class FCUI_Fast_Checkout {
         return [$first, $last];
     }
 
-    // ========== Standalone: Fast Checkout ==========
     private static function get_context_from_query() {
         $product_id   = isset($_GET['product_id']) ? absint($_GET['product_id']) : 0;
         $variation_id = isset($_GET['variation_id']) ? absint($_GET['variation_id']) : 0;
         $qty          = isset($_GET['quantity']) ? max(1, absint($_GET['quantity'])) : 1;
 
-        if (!$product_id) return [null, null, [], 0, 0, 1, '', ''];
+        if (!$product_id) return [null, null, [], 0, 0, 1, '', '', false];
 
         if (!self::is_enabled_for_product($product_id)) {
-            return [null, null, [], 0, 0, 1, '', 'not_allowed'];
+            return [null, null, [], 0, 0, 1, '', 'not_allowed', false];
         }
 
         $display_product = wc_get_product($variation_id ? $variation_id : $product_id);
-        if (!$display_product) return [null, null, [], 0, 0, 1, '', ''];
+        if (!$display_product) return [null, null, [], 0, 0, 1, '', '', false];
 
         $parent_product = wc_get_product($product_id);
+        $is_physical = self::is_physical_product($display_product);
 
         $variation = [];
         foreach ($_GET as $k => $v) {
@@ -433,7 +492,7 @@ final class FCUI_Fast_Checkout {
 
         $product_url = get_permalink($product_id);
 
-        return [$display_product, $parent_product, $variation, $product_id, $variation_id, $qty, $product_url, 'ok'];
+        return [$display_product, $parent_product, $variation, $product_id, $variation_id, $qty, $product_url, 'ok', $is_physical];
     }
 
     private static function enforce_login_or_redirect() {
@@ -445,7 +504,6 @@ final class FCUI_Fast_Checkout {
             $redirect = self::is_fast_checkout_page()
                 ? self::get_fast_checkout_url($_GET)
                 : self::get_card2card_url($_GET);
-
             wp_safe_redirect(self::get_theme_login_url($redirect));
             exit;
         }
@@ -456,23 +514,18 @@ final class FCUI_Fast_Checkout {
 
         self::enforce_login_or_redirect();
 
-        // Handle POST actions
         if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             self::handle_fast_checkout_post();
-            // handler exits
         }
 
-        list($product, $parent_product, $variation, $product_id, $variation_id, $qty, $product_url, $state) = self::get_context_from_query();
+        list($product, $parent_product, $variation, $product_id, $variation_id, $qty, $product_url, $state, $is_physical) = self::get_context_from_query();
 
         nocache_headers();
-
         $gateways = WC()->payment_gateways()->get_available_payment_gateways();
         $prefill  = self::get_user_prefill();
-
         $s = self::get_settings();
 
         status_header($product ? 200 : 404);
-
         ?>
 <!doctype html>
 <html <?php language_attributes(); ?>>
@@ -481,19 +534,21 @@ final class FCUI_Fast_Checkout {
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <?php wp_head(); ?>
 </head>
-<body <?php body_class(); ?>>
+<body <?php body_class($is_physical ? 'fcui-physical' : 'fcui-digital'); ?>>
 <?php if (function_exists('wp_body_open')) wp_body_open(); ?>
-
 <?php
         if ($state === 'not_allowed') {
             echo '<div style="max-width:680px;margin:40px auto;padding:0 14px;">این محصول در حالت پرداخت سریع فعال نیست.</div>';
         } elseif (!$product) {
             echo '<div style="max-width:680px;margin:40px auto;padding:0 14px;">محصول مشخص نیست.</div>';
         } else {
-            include __DIR__ . '/templates/fast-checkout-page.php';
+            if ($is_physical && file_exists(__DIR__ . '/templates/fast-checkout-physical.php')) {
+                include __DIR__ . '/templates/fast-checkout-physical.php';
+            } else {
+                include __DIR__ . '/templates/fast-checkout-page.php';
+            }
         }
 ?>
-
 <?php wp_footer(); ?>
 </body>
 </html>
@@ -514,14 +569,10 @@ final class FCUI_Fast_Checkout {
         $qty          = max(1, absint($_POST['quantity'] ?? 1));
         $product = wc_get_product($product_id);
 
-if (!$product || !$product->is_purchasable() || !$product->is_in_stock()) {
-    wp_safe_redirect(self::get_fast_checkout_url([
-        'product_id' => $product_id,
-        'err' => 'outofstock'
-    ]));
-    exit;
-}
-
+        if (!$product || !$product->is_purchasable() || !$product->is_in_stock()) {
+            wp_safe_redirect(self::get_fast_checkout_url(['product_id' => $product_id, 'err' => 'outofstock']));
+            exit;
+        }
 
         if (!$product_id || !self::is_enabled_for_product($product_id)) {
             wp_safe_redirect(self::get_fast_checkout_url());
@@ -545,9 +596,13 @@ if (!$product || !$product->is_purchasable() || !$product->is_in_stock()) {
         }
 
         $variation = [];
+        $extra_data = [];
         foreach ($_POST as $k => $v) {
             if (strpos($k, 'attribute_') === 0) {
                 $variation[sanitize_text_field($k)] = sanitize_text_field(wp_unslash($v));
+            }
+            if (strpos($k, 'billing_') === 0 && !in_array($k, ['billing_full_name','billing_phone','billing_email'])) {
+                $extra_data[$k] = sanitize_text_field(wp_unslash($v));
             }
         }
 
@@ -557,76 +612,67 @@ if (!$product || !$product->is_purchasable() || !$product->is_in_stock()) {
             exit;
         }
 
-        // Pay later => add to cart & go cart
+        // افزودن به سبد برای بعد
         if (isset($_POST['fcui_add_to_cart_later'])) {
             WC()->cart->add_to_cart($product_id, $qty, $variation_id, $variation);
             wp_safe_redirect(wc_get_cart_url());
             exit;
         }
-// Free register
-if (isset($_POST['fcui_free_register'])) {
 
-    $user_id = get_current_user_id();
+        // ثبت نام رایگان
+        if (isset($_POST['fcui_free_register'])) {
+            $user_id = get_current_user_id();
+            if (!$user_id) {
+                $username = sanitize_user($phone);
+                $password = wp_generate_password();
+                $user_id = wp_create_user($username, $password, $email);
+                if (!is_wp_error($user_id)) {
+                    wp_set_current_user($user_id);
+                    wp_set_auth_cookie($user_id);
+                    update_user_meta($user_id, 'first_name', $first);
+                    update_user_meta($user_id, 'last_name', $last);
+                }
+            }
 
-    if (!$user_id) {
+            $order = wc_create_order();
+            $order->add_product($product, $qty);
+            $order->set_address([
+                'first_name' => $first,
+                'last_name'  => $last,
+                'email'      => $email,
+                'phone'      => $phone,
+            ] + $extra_data, 'billing');
+            $order->set_customer_id($user_id);
+            $order->calculate_totals();
+            $order->update_status('completed');
+            $order->save();
 
-        $username = sanitize_user($phone);
-        $password = wp_generate_password();
-
-        $user_id = wp_create_user($username, $password, $email);
-
-        if (!is_wp_error($user_id)) {
-
-            wp_set_current_user($user_id);
-            wp_set_auth_cookie($user_id);
+            wp_safe_redirect(add_query_arg([
+                'order_id' => $order->get_id(),
+                'key'      => $order->get_order_key(),
+                'type'     => 'online'
+            ], home_url('/order-success/')));
+            exit;
         }
-    }
 
-    $order = wc_create_order();
-
-    $order->add_product($product, $qty);
-
-    $order->set_address([
-        'first_name' => $first_name,
-        'last_name'  => $last_name,
-        'email'      => $email,
-        'phone'      => $phone,
-    ], 'billing');
-
-    $order->set_customer_id($user_id);
-
-    $order->calculate_totals();
-
-    $order->update_status('completed');
-
-    wp_safe_redirect(
-        add_query_arg([
-            'order_id' => $order->get_id(),
-            'key'      => $order->get_order_key(),
-            'type'     => 'online'
-        ], home_url('/order-success/'))
-    );
-
-    exit;
-}
-
-        // Pay now
+        // پرداخت
         $payment_method = sanitize_text_field($_POST['payment_method'] ?? '');
         if (!$payment_method) {
             wp_safe_redirect(self::get_fast_checkout_url(['product_id' => $product_id, 'err' => 1]));
             exit;
         }
 
-        // Fill user meta
         $uid = get_current_user_id();
         if ($uid) {
             update_user_meta($uid, 'billing_first_name', $first);
             update_user_meta($uid, 'billing_last_name', $last);
             update_user_meta($uid, 'billing_phone', $phone);
             update_user_meta($uid, 'billing_email', $email);
+            foreach ($extra_data as $k => $v) {
+                update_user_meta($uid, $k, $v);
+            }
         }
 
-        // Build cart single-item for payment
         WC()->cart->empty_cart();
         $added = WC()->cart->add_to_cart($product_id, $qty, $variation_id, $variation);
         if (!$added) {
@@ -634,9 +680,14 @@ if (isset($_POST['fcui_free_register'])) {
             exit;
         }
 
-        // If card2card selected => create order and redirect to c2c page
+        // کد تخفیف
+        if (!empty($_POST['fcui_coupon'])) {
+            $coupon_code = sanitize_text_field($_POST['fcui_coupon']);
+            WC()->cart->apply_coupon($coupon_code);
+        }
+
         if ($payment_method === 'fcui_card2card') {
-            $order_id = self::create_order_for_card2card($first, $last, $phone, $email, $payment_method);
+            $order_id = self::create_order_for_card2card($first, $last, $phone, $email, $payment_method, $extra_data);
             if (!$order_id) {
                 wp_safe_redirect(self::get_fast_checkout_url(['product_id' => $product_id, 'err' => 1]));
                 exit;
@@ -648,13 +699,14 @@ if (isset($_POST['fcui_free_register'])) {
             exit;
         }
 
-        // Normal gateways: run Woo checkout
         wc_maybe_define_constant('WOOCOMMERCE_CHECKOUT', true);
-
         $_POST['billing_first_name'] = $first;
         $_POST['billing_last_name']  = $last;
         $_POST['billing_phone']      = $phone;
         $_POST['billing_email']      = $email;
+        foreach ($extra_data as $k => $v) {
+            $_POST[$k] = $v;
+        }
         $_POST['payment_method']     = $payment_method;
         $_POST['terms']              = 1;
         $_POST['ship_to_different_address'] = 0;
@@ -667,74 +719,78 @@ if (isset($_POST['fcui_free_register'])) {
         exit;
     }
 
-    private static function create_order_for_card2card($first, $last, $phone, $email, $payment_method) {
+    private static function create_order_for_card2card($first, $last, $phone, $email, $payment_method, $extra = []) {
         try {
             wc_maybe_define_constant('WOOCOMMERCE_CHECKOUT', true);
-
-            // Create order from cart
             $checkout = WC()->checkout();
-            $order_id = $checkout->create_order([
+            $order_id = $checkout->create_order(array_merge([
                 'billing_first_name' => $first,
                 'billing_last_name'  => $last,
                 'billing_phone'      => $phone,
                 'billing_email'      => $email,
-            ]);
+            ], $extra));
 
             if (is_wp_error($order_id) || !$order_id) return 0;
-
             $order = wc_get_order($order_id);
             if (!$order) return 0;
 
             $order->set_payment_method($payment_method);
-
-            // timer
             $s = self::get_settings();
             $mins = max(1, (int)$s['c2c_timer_minutes']);
             $expires = time() + ($mins * 60);
             $order->update_meta_data('_fcui_c2c_expires_at', $expires);
-
             $order->update_status('on-hold', 'در انتظار پرداخت کارت به کارت و بررسی رسید');
             $order->save();
-
             WC()->cart->empty_cart();
-
             return (int)$order_id;
-
         } catch (Throwable $e) {
             return 0;
         }
     }
 
-    // ========== Standalone: Card-to-Card page ==========
+    public static function save_custom_fields($order_id) {
+        $s = self::get_settings();
+        if (!empty($s['enable_national_code']) && isset($_POST['billing_national_code'])) {
+            update_post_meta($order_id, '_billing_national_code', sanitize_text_field($_POST['billing_national_code']));
+        }
+        if (!empty($s['custom_fields'])) {
+            foreach ($s['custom_fields'] as $cf) {
+                if (empty($cf['key']) || empty($cf['active'])) continue;
+                $key = 'billing_'.$cf['key'];
+                if (isset($_POST[$key])) {
+                    update_post_meta($order_id, '_'.$key, sanitize_text_field($_POST[$key]));
+                }
+            }
+        }
+    }
+
+    public static function display_custom_fields_admin($order) {
+        $national = $order->get_meta('_billing_national_code');
+        if ($national) {
+            echo '<p><strong>کد ملی:</strong> ' . esc_html($national) . '</p>';
+        }
+    }
+
+    // ========== Card2Card ==========
     public static function render_standalone_card2card() {
         if (!self::is_card2card_page()) return;
-
         self::enforce_login_or_redirect();
 
         $order_id = isset($_GET['order_id']) ? absint($_GET['order_id']) : 0;
         $key      = isset($_GET['key']) ? sanitize_text_field($_GET['key']) : '';
-
         $order = $order_id ? wc_get_order($order_id) : null;
+        
         if (!$order || !$key || $order->get_order_key() !== $key) {
-            status_header(404);
-            nocache_headers();
-            echo 'سفارش معتبر نیست.';
-            exit;
+            status_header(404); nocache_headers(); echo 'سفارش معتبر نیست.'; exit;
         }
 
-        // Ensure owner
         $uid = get_current_user_id();
         if ($order->get_user_id() && $uid && (int)$order->get_user_id() !== (int)$uid) {
-            status_header(403);
-            nocache_headers();
-            echo 'دسترسی غیرمجاز';
-            exit;
+            status_header(403); nocache_headers(); echo 'دسترسی غیرمجاز'; exit;
         }
 
-        // Handle upload submit
         if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             self::handle_card2card_upload($order);
-            // handler exits
         }
 
         $s = self::get_settings();
@@ -747,481 +803,291 @@ if (isset($_POST['fcui_free_register'])) {
             $order->save();
         }
 
-        $receipt1 = (string) $order->get_meta('_fcui_c2c_receipt_1');
-        $receipt2 = (string) $order->get_meta('_fcui_c2c_receipt_2');
-
-        nocache_headers();
-        status_header(200);
+        nocache_headers(); status_header(200);
         ?>
-<!doctype html>
-<html <?php language_attributes(); ?>>
-<head>
-  <meta charset="<?php bloginfo('charset'); ?>">
-  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-  <?php wp_head(); ?>
-</head>
+<!doctype html><html <?php language_attributes(); ?>><head>
+<meta charset="<?php bloginfo('charset'); ?>">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<?php wp_head(); ?></head>
 <body <?php body_class('fcui-c2c-theme-' . esc_attr($theme)); ?>>
 <?php if (function_exists('wp_body_open')) wp_body_open(); ?>
-
 <?php include __DIR__ . '/templates/card2card-page.php'; ?>
-
-<?php wp_footer(); ?>
-</body>
-</html>
-        <?php
-        exit;
+<?php wp_footer(); ?></body></html>
+        <?php exit;
     }
 
     private static function handle_card2card_upload($order) {
         if (!isset($_POST['fcui_nonce']) || !wp_verify_nonce($_POST['fcui_nonce'], 'fcui_card2card')) {
-            wp_safe_redirect(self::get_card2card_url(['order_id'=>$order->get_id(),'key'=>$order->get_order_key(),'err'=>1]));
-            exit;
+            wp_safe_redirect(self::get_card2card_url(['order_id'=>$order->get_id(),'key'=>$order->get_order_key(),'err'=>1])); exit;
         }
 
         $expires_at = (int) $order->get_meta('_fcui_c2c_expires_at');
         if ($expires_at && time() > $expires_at) {
-            wp_safe_redirect(self::get_card2card_url(['order_id'=>$order->get_id(),'key'=>$order->get_order_key(),'expired'=>1]));
-            exit;
+            wp_safe_redirect(self::get_card2card_url(['order_id'=>$order->get_id(),'key'=>$order->get_order_key(),'expired'=>1])); exit;
         }
 
-        // receipt 1 is required
         if (empty($_FILES['receipt_1']['name'])) {
-            wp_safe_redirect(self::get_card2card_url(['order_id'=>$order->get_id(),'key'=>$order->get_order_key(),'err'=>2]));
-            exit;
+            wp_safe_redirect(self::get_card2card_url(['order_id'=>$order->get_id(),'key'=>$order->get_order_key(),'err'=>2])); exit;
         }
 
         $s = self::get_settings();
         $max_mb = max(1, (int)$s['c2c_max_mb']);
         $max_bytes = $max_mb * 1024 * 1024;
-
         require_once ABSPATH . 'wp-admin/includes/file.php';
 
-        $mimes = [
-            'jpg|jpeg' => 'image/jpeg',
-            'png'      => 'image/png',
-            'webp'     => 'image/webp',
-            'pdf'      => 'application/pdf',
-        ];
-
+        $mimes = ['jpg|jpeg' => 'image/jpeg', 'png' => 'image/png', 'webp' => 'image/webp', 'pdf' => 'application/pdf'];
         $urls = [];
 
         foreach (['receipt_1', 'receipt_2'] as $field) {
             if (empty($_FILES[$field]['name'])) continue;
-
             if (!empty($_FILES[$field]['size']) && (int)$_FILES[$field]['size'] > $max_bytes) {
-                wp_safe_redirect(self::get_card2card_url(['order_id'=>$order->get_id(),'key'=>$order->get_order_key(),'err'=>3]));
-                exit;
+                wp_safe_redirect(self::get_card2card_url(['order_id'=>$order->get_id(),'key'=>$order->get_order_key(),'err'=>3])); exit;
             }
-
-            $upload = wp_handle_upload($_FILES[$field], [
-                'test_form' => false,
-                'mimes'     => $mimes,
-            ]);
-
+            $upload = wp_handle_upload($_FILES[$field], ['test_form' => false, 'mimes' => $mimes]);
             if (!empty($upload['error'])) {
-                wp_safe_redirect(self::get_card2card_url(['order_id'=>$order->get_id(),'key'=>$order->get_order_key(),'err'=>4]));
-                exit;
+                wp_safe_redirect(self::get_card2card_url(['order_id'=>$order->get_id(),'key'=>$order->get_order_key(),'err'=>4])); exit;
             }
-
-            if (!empty($upload['url'])) {
-                $urls[$field] = esc_url_raw($upload['url']);
-            }
+            if (!empty($upload['url'])) $urls[$field] = esc_url_raw($upload['url']);
         }
 
         if (empty($urls['receipt_1'])) {
-            wp_safe_redirect(self::get_card2card_url(['order_id'=>$order->get_id(),'key'=>$order->get_order_key(),'err'=>4]));
-            exit;
+            wp_safe_redirect(self::get_card2card_url(['order_id'=>$order->get_id(),'key'=>$order->get_order_key(),'err'=>4])); exit;
         }
 
         $order->update_meta_data('_fcui_c2c_receipt_1', $urls['receipt_1']);
-        if (!empty($urls['receipt_2'])) {
-            $order->update_meta_data('_fcui_c2c_receipt_2', $urls['receipt_2']);
-        }
-
+        if (!empty($urls['receipt_2'])) $order->update_meta_data('_fcui_c2c_receipt_2', $urls['receipt_2']);
         $order->add_order_note('رسید کارت به کارت توسط کاربر آپلود شد.');
-        // Keep on-hold until admin approval
-        $order->update_status('on-hold');
-        $order->save();
+        $order->update_status('on-hold'); $order->save();
 
-        wp_safe_redirect(
-            home_url('/order-success/?order_id=' . $order->get_id() . '&key=' . $order->get_order_key() . '&type=c2c')
-        );
+        wp_safe_redirect(home_url('/order-success/?order_id=' . $order->get_id() . '&key=' . $order->get_order_key() . '&type=c2c'));
         exit;
     }
 
-    // ========== Admin ==========
+    // ========== ADMIN ==========
     public static function admin_menu() {
-        add_submenu_page(
-            'woocommerce',
-            'تنظیمات پرداخت سریع ',
-            'تنظیمات پرداخت سریع ',
+        add_menu_page(
+            'پرداخت سریع',
+            'پرداخت سریع',
             'manage_woocommerce',
-            'fcui-fast-checkout',
-            [__CLASS__, 'admin_settings_page']
+            'fcui-dashboard',
+            [__CLASS__, 'admin_dashboard'],
+            'dashicons-money-alt',
+            56
         );
+        
+        add_submenu_page('fcui-dashboard', 'داشبورد', 'داشبورد', 'manage_woocommerce', 'fcui-dashboard', [__CLASS__, 'admin_dashboard']);
+        add_submenu_page('fcui-dashboard', 'تنظیمات', 'تنظیمات', 'manage_woocommerce', 'fcui-settings', [__CLASS__, 'admin_settings_page']);
+        add_submenu_page('fcui-dashboard', 'سفارشات کارت به کارت', 'کارت به کارت', 'manage_woocommerce', 'fcui-card2card-orders', [__CLASS__, 'admin_card2card_orders_page']);
+        add_submenu_page('fcui-dashboard', 'آموزش', 'آموزش و راهنما', 'manage_woocommerce', 'fcui-tutorial', [__CLASS__, 'admin_tutorial_page']);
+    }
 
-        add_submenu_page(
-            'woocommerce',
-            'سفارش های کارت به کارت',
-            'سفارش های کارت به کارت',
-            'manage_woocommerce',
-            'fcui-card2card-orders',
-            [__CLASS__, 'admin_card2card_orders_page']
-        );
+    public static function admin_dashboard() {
+        if (!current_user_can('manage_woocommerce')) return;
+        $s = self::get_settings();
+        $orders_count = wc_get_orders(['limit' => -1, 'payment_method' => 'fcui_card2card', 'status' => 'on-hold', 'return' => 'ids']);
+        ?>
+        <div class="wrap fcui-admin" style="direction:rtl;font-family:Tahoma">
+            <h1 style="display:flex;align-items:center;gap:12px">
+                <span class="dashicons dashicons-money-alt" style="font-size:32px;color:#1e6bff"></span>
+                پرداخت سریع - داشبورد
+                <span style="background:#1e6bff;color:#fff;padding:4px 10px;border-radius:8px;font-size:12px">v<?php echo self::VERSION; ?></span>
+            </h1>
+            
+            <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:20px;margin-top:30px">
+                <div style="background:#fff;border:1px solid #e2e8f0;border-radius:16px;padding:24px;box-shadow:0 4px 12px rgba(0,0,0,.05)">
+                    <div style="display:flex;justify-content:space-between;align-items:start">
+                        <div>
+                            <div style="color:#64748b;font-size:13px;margin-bottom:8px">سفارشات در انتظار</div>
+                            <div style="font-size:32px;font-weight:900;color:#0f172a"><?php echo count($orders_count); ?></div>
+                        </div>
+                        <div style="background:#fef3c7;padding:12px;border-radius:12px"><span class="dashicons dashicons-clock" style="color:#d97706"></span></div>
+                    </div>
+                    <a href="<?php echo admin_url('admin.php?page=fcui-card2card-orders'); ?>" style="display:inline-block;margin-top:16px;color:#1e6bff;text-decoration:none;font-weight:700">مشاهده ←</a>
+                </div>
+                
+                <div style="background:#fff;border:1px solid #e2e8f0;border-radius:16px;padding:24px;box-shadow:0 4px 12px rgba(0,0,0,.05)">
+                    <div style="display:flex;justify-content:space-between;align-items:start">
+                        <div>
+                            <div style="color:#64748b;font-size:13px;margin-bottom:8px">صفحه پرداخت</div>
+                            <div style="font-size:16px;font-weight:800;color:#0f172a;margin-top:8px"><?php echo esc_html(get_permalink(get_option(self::OPT_FAST_PAGE_ID))); ?></div>
+                        </div>
+                        <div style="background:#dbeafe;padding:12px;border-radius:12px"><span class="dashicons dashicons-cart" style="color:#1e6bff"></span></div>
+                    </div>
+                    <a href="<?php echo esc_url(get_permalink(get_option(self::OPT_FAST_PAGE_ID))); ?>" target="_blank" style="display:inline-block;margin-top:16px;color:#1e6bff;text-decoration:none;font-weight:700">مشاهده صفحه ←</a>
+                </div>
+                
+                <div style="background:linear-gradient(135deg,#1e6bff,#0ea5e9);border-radius:16px;padding:24px;color:#fff;box-shadow:0 8px 24px rgba(30,107,255,.3)">
+                    <div style="font-size:18px;font-weight:900;margin-bottom:12px">راه‌اندازی سریع</div>
+                    <div style="opacity:.9;font-size:13px;line-height:1.7">برای بهترین تجربه، رنگ برند و فیلدهای فیزیکی را تنظیم کنید.</div>
+                    <a href="<?php echo admin_url('admin.php?page=fcui-settings'); ?>" style="display:inline-block;margin-top:16px;background:#fff;color:#1e6bff;padding:8px 16px;border-radius:10px;text-decoration:none;font-weight:800">تنظیمات</a>
+                </div>
+            </div>
+        </div>
+        <?php
     }
 
     public static function admin_settings_page() {
-
         if (!current_user_can('manage_woocommerce')) return;
-    
         $s = self::get_settings();
-    
-        if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['fcui_save_settings'])) {
-    
+        $tab = isset($_GET['tab']) ? sanitize_key($_GET['tab']) : 'general';
+
+        if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['fcui_save'])) {
             check_admin_referer('fcui_save_settings');
-    
-            $s['require_login'] = !empty($_POST['require_login']) ? 1 : 0;
-    
-            $apply = sanitize_key($_POST['apply_mode'] ?? 'all');
-            $s['apply_mode'] = in_array($apply, ['all','digital'], true) ? $apply : 'all';
-    
-            $s['c2c_enabled'] = !empty($_POST['c2c_enabled']) ? 1 : 0;
-    
-            $s['c2c_card_number'] = sanitize_text_field($_POST['c2c_card_number'] ?? '');
-    
-            $s['c2c_holder_name'] = sanitize_text_field($_POST['c2c_holder_name'] ?? '');
-    
-            $s['c2c_bank_name'] = sanitize_text_field($_POST['c2c_bank_name'] ?? '');
-    
-            $theme = sanitize_key($_POST['c2c_theme'] ?? 'blue');
-    
-            $s['c2c_theme'] = in_array($theme, ['blue','red','gold','dark'], true)
-                ? $theme
-                : 'blue';
-    
-            $s['c2c_timer_minutes'] = max(
-                1,
-                (int)($_POST['c2c_timer_minutes'] ?? 20)
-            );
-    
-            $st = sanitize_key($_POST['c2c_approved_status'] ?? 'completed');
-    
-            $s['c2c_approved_status'] = in_array(
-                $st,
-                ['processing','completed'],
-                true
-            ) ? $st : 'completed';
-    
-            $s['c2c_max_mb'] = max(
-                1,
-                (int)($_POST['c2c_max_mb'] ?? 3)
-            );
-    
-            // Success page settings
-            $s['success_page_title'] = sanitize_text_field(
-                $_POST['success_page_title'] ?? ''
-            );
-    
-            $s['success_page_online_message'] = sanitize_textarea_field(
-                $_POST['success_page_online_message'] ?? ''
-            );
-    
-            $s['success_page_c2c_message'] = sanitize_textarea_field(
-                $_POST['success_page_c2c_message'] ?? ''
-            );
-    
-            $s['course_access_link'] = esc_url_raw(
-                $_POST['course_access_link'] ?? ''
-            );
-    
+            
+            // ذخیره همه تنظیمات
+            foreach (self::default_settings() as $key => $default) {
+                if (isset($_POST[$key])) {
+                    if (is_array($_POST[$key])) {
+                        $s[$key] = array_map('sanitize_text_field', $_POST[$key]);
+                    } else {
+                        $s[$key] = sanitize_text_field($_POST[$key]);
+                    }
+                } else {
+                    if (is_numeric($default) || is_bool($default)) $s[$key] = 0;
+                }
+            }
+            
+            // فیلدهای سفارشی
+            if (isset($_POST['custom_fields'])) {
+                $custom = [];
+                foreach ($_POST['custom_fields'] as $cf) {
+                    if (!empty($cf['key']) && !empty($cf['label'])) {
+                        $custom[] = [
+                            'key' => sanitize_key($cf['key']),
+                            'label' => sanitize_text_field($cf['label']),
+                            'required' => !empty($cf['required']) ? 1 : 0,
+                            'active' => !empty($cf['active']) ? 1 : 0,
+                            'order' => (int)$cf['order'],
+                        ];
+                    }
+                }
+                $s['custom_fields'] = $custom;
+            }
+            
             self::save_settings($s);
-    
-            echo '<div class="updated"><p>تنظیمات ذخیره شد.</p></div>';
+            echo '<div class="notice notice-success is-dismissible"><p>✅ تنظیمات با موفقیت ذخیره شد</p></div>';
         }
-    
         ?>
-    
-        <div class="wrap">
-    
-            <h1>FCUI پرداخت سریع - تنظیمات</h1>
-    
-            <form method="post">
-    
+        <div class="wrap fcui-admin" style="direction:rtl">
+            <h1>تنظیمات پرداخت سریع</h1>
+            
+            <h2 class="nav-tab-wrapper" style="margin-top:20px">
+                <a href="?page=fcui-settings&tab=general" class="nav-tab <?php echo $tab=='general'?'nav-tab-active':''; ?>">عمومی</a>
+                <a href="?page=fcui-settings&tab=appearance" class="nav-tab <?php echo $tab=='appearance'?'nav-tab-active':''; ?>">ظاهر و استایل</a>
+                <a href="?page=fcui-settings&tab=physical" class="nav-tab <?php echo $tab=='physical'?'nav-tab-active':''; ?>">محصولات فیزیکی</a>
+                <a href="?page=fcui-settings&tab=card2card" class="nav-tab <?php echo $tab=='card2card'?'nav-tab-active':''; ?>">کارت به کارت</a>
+                <a href="?page=fcui-settings&tab=messages" class="nav-tab <?php echo $tab=='messages'?'nav-tab-active':''; ?>">پیام‌ها</a>
+            </h2>
+            
+            <form method="post" style="background:#fff;padding:24px;border:1px solid #e2e8f0;border-top:0;border-radius:0 0 12px 12px;max-width:900px">
                 <?php wp_nonce_field('fcui_save_settings'); ?>
-    
-                <table class="form-table" role="presentation">
-    
-                    <tr>
-                        <th scope="row">اجبار به لاگین</th>
-    
-                        <td>
-                            <label>
-                                <input
-                                    type="checkbox"
-                                    name="require_login"
-                                    value="1"
-                                    <?php checked(1, (int)$s['require_login']); ?>
-                                >
-    
-                                فقط کاربران وارد شده بتوانند پرداخت سریع را ببینند
-                            </label>
-                        </td>
-                    </tr>
-    
-                    <tr>
-                        <th scope="row">اعمال افزونه روی محصولات</th>
-    
-                        <td>
-    
-                            <label>
-                                <input
-                                    type="radio"
-                                    name="apply_mode"
-                                    value="all"
-                                    <?php checked('all', $s['apply_mode']); ?>
-                                >
-                                همه محصولات
-                            </label>
-    
-                            <br>
-    
-                            <label>
-                                <input
-                                    type="radio"
-                                    name="apply_mode"
-                                    value="digital"
-                                    <?php checked('digital', $s['apply_mode']); ?>
-                                >
-                                فقط محصولات دیجیتال
-                            </label>
-    
-                        </td>
-                    </tr>
-    
-                    <tr>
-                        <th colspan="2">
-                            <h2>کارت به کارت</h2>
-                        </th>
-                    </tr>
-    
-                    <tr>
-                        <th scope="row">فعال</th>
-    
-                        <td>
-                            <label>
-                                <input
-                                    type="checkbox"
-                                    name="c2c_enabled"
-                                    value="1"
-                                    <?php checked(1, (int)$s['c2c_enabled']); ?>
-                                >
-    
-                                روش کارت به کارت فعال باشد
-                            </label>
-                        </td>
-                    </tr>
-    
-                    <tr>
-                        <th scope="row">شماره کارت</th>
-    
-                        <td>
-                            <input
-                                type="text"
-                                name="c2c_card_number"
-                                value="<?php echo esc_attr($s['c2c_card_number']); ?>"
-                                class="regular-text"
-                            >
-                        </td>
-                    </tr>
-    
-                    <tr>
-                        <th scope="row">نام صاحب کارت</th>
-    
-                        <td>
-                            <input
-                                type="text"
-                                name="c2c_holder_name"
-                                value="<?php echo esc_attr($s['c2c_holder_name']); ?>"
-                                class="regular-text"
-                            >
-                        </td>
-                    </tr>
-    
-                    <tr>
-                        <th scope="row">نام بانک</th>
-    
-                        <td>
-                            <input
-                                type="text"
-                                name="c2c_bank_name"
-                                value="<?php echo esc_attr($s['c2c_bank_name']); ?>"
-                                class="regular-text"
-                            >
-                        </td>
-                    </tr>
-    
-                    <tr>
-                        <th scope="row">تم کارت</th>
-    
-                        <td>
-    
-                            <select name="c2c_theme">
-    
-                                <option value="blue" <?php selected('blue', $s['c2c_theme']); ?>>
-                                    آبی
-                                </option>
-    
-                                <option value="red" <?php selected('red', $s['c2c_theme']); ?>>
-                                    قرمز
-                                </option>
-    
-                                <option value="gold" <?php selected('gold', $s['c2c_theme']); ?>>
-                                    طلایی
-                                </option>
-    
-                                <option value="dark" <?php selected('dark', $s['c2c_theme']); ?>>
-                                    مشکی
-                                </option>
-    
-                            </select>
-    
-                        </td>
-                    </tr>
-    
-                    <tr>
-                        <th scope="row">تایمر پرداخت</th>
-    
-                        <td>
-                            <input
-                                type="number"
-                                name="c2c_timer_minutes"
-                                value="<?php echo (int)$s['c2c_timer_minutes']; ?>"
-                                min="1"
-                            >
-                        </td>
-                    </tr>
-    
-                    <tr>
-                        <th scope="row">حداکثر حجم رسید</th>
-    
-                        <td>
-                            <input
-                                type="number"
-                                name="c2c_max_mb"
-                                value="<?php echo (int)$s['c2c_max_mb']; ?>"
-                                min="1"
-                            >
-                        </td>
-                    </tr>
-    
-                    <tr>
-                        <th scope="row">وضعیت سفارش بعد از تأیید</th>
-    
-                        <td>
-    
-                            <select name="c2c_approved_status">
-    
-                                <option value="processing" <?php selected('processing', $s['c2c_approved_status']); ?>>
-                                    Processing
-                                </option>
-    
-                                <option value="completed" <?php selected('completed', $s['c2c_approved_status']); ?>>
-                                    Completed
-                                </option>
-    
-                            </select>
-    
-                        </td>
-                    </tr>
-    
-                    <tr>
-                        <th colspan="2">
-                            <h2>صفحه موفقیت پرداخت</h2>
-                        </th>
-                    </tr>
-    
-                    <tr>
-                        <th scope="row">عنوان صفحه موفقیت</th>
-    
-                        <td>
-                            <input
-                                type="text"
-                                name="success_page_title"
-                                value="<?php echo esc_attr($s['success_page_title']); ?>"
-                                class="regular-text"
-                            >
-                        </td>
-                    </tr>
-    
-                    <tr>
-                        <th scope="row">متن پرداخت آنلاین</th>
-    
-                        <td>
-                            <textarea
-                                name="success_page_online_message"
-                                rows="3"
-                                class="large-text"
-                            ><?php echo esc_textarea($s['success_page_online_message']); ?></textarea>
-                        </td>
-                    </tr>
-    
-                    <tr>
-                        <th scope="row">متن کارت به کارت</th>
-    
-                        <td>
-                            <textarea
-                                name="success_page_c2c_message"
-                                rows="3"
-                                class="large-text"
-                            ><?php echo esc_textarea($s['success_page_c2c_message']); ?></textarea>
-                        </td>
-                    </tr>
-    
-                    <tr>
-                        <th scope="row">لینک ورود به دوره</th>
-    
-                        <td>
-    
-                            <input
-                                type="url"
-                                name="course_access_link"
-                                value="<?php echo esc_attr($s['course_access_link']); ?>"
-                                class="regular-text"
-                            >
-    
-                            <p class="description">
-                                اگر خالی باشد کاربر به صفحه حساب کاربری هدایت می‌شود.
-                            </p>
-    
-                        </td>
-                    </tr>
-    
+                
+                <?php if ($tab === 'general'): ?>
+                <table class="form-table">
+                    <tr><th>اجبار به ورود</th><td><label><input type="checkbox" name="require_login" value="1" <?php checked($s['require_login'],1); ?>> فقط کاربران وارد شده</label></td></tr>
+                    <tr><th>حالت اعمال</th><td>
+                        <label><input type="radio" name="apply_mode" value="all" <?php checked($s['apply_mode'],'all'); ?>> همه محصولات</label><br>
+                        <label><input type="radio" name="apply_mode" value="digital" <?php checked($s['apply_mode'],'digital'); ?>> فقط دیجیتال</label>
+                    </td></tr>
+                    <tr><th>کد تخفیف</th><td>
+                        <label><input type="checkbox" name="coupon_enabled" value="1" <?php checked($s['coupon_enabled'],1); ?>> فعال باشد</label><br><br>
+                        <input type="text" name="coupon_label" value="<?php echo esc_attr($s['coupon_label']); ?>" class="regular-text" placeholder="متن لیبل">
+                    </td></tr>
                 </table>
-    
-                <p>
-                    <button
-                        class="button button-primary"
-                        name="fcui_save_settings"
-                        value="1"
-                    >
-                        ذخیره تنظیمات
-                    </button>
-                </p>
-    
+                <?php endif; ?>
+                
+                <?php if ($tab === 'appearance'): ?>
+                <table class="form-table">
+                    <tr><th>رنگ اصلی</th><td><input type="text" name="primary_color" value="<?php echo esc_attr($s['primary_color']); ?>" class="fcui-color"></td></tr>
+                    <tr><th>رنگ پس‌زمینه</th><td><input type="text" name="background_color" value="<?php echo esc_attr($s['background_color']); ?>" class="fcui-color"></td></tr>
+                    <tr><th>گردی کارت‌ها</th><td><input type="number" name="card_radius" value="<?php echo (int)$s['card_radius']; ?>" min="0" max="30"> پیکسل</td></tr>
+                    <tr><th>متن دکمه پرداخت</th><td><input type="text" name="button_pay_text" value="<?php echo esc_attr($s['button_pay_text']); ?>" class="regular-text"></td></tr>
+                    <tr><th>متن دکمه بعداً</th><td><input type="text" name="button_later_text" value="<?php echo esc_attr($s['button_later_text']); ?>" class="regular-text"></td></tr>
+                    <tr><th>متن راهنما</th><td><input type="text" name="hint_text" value="<?php echo esc_attr($s['hint_text']); ?>" class="large-text"></td></tr>
+                </table>
+                <?php endif; ?>
+                
+                <?php if ($tab === 'physical'): ?>
+                <h3>فیلدهای محصولات فیزیکی</h3>
+                <p>فیلدهای زیر در صفحه پرداخت محصولات فیزیکی نمایش داده می‌شود:</p>
+                <table class="form-table">
+                    <tr><th>فعال‌سازی</th><td><label><input type="checkbox" name="physical_enabled" value="1" <?php checked($s['physical_enabled'],1); ?>> پرداخت سریع برای فیزیکی فعال باشد</label></td></tr>
+                    <tr><th>فیلدها</th><td>
+                        <?php $fields = ['billing_state'=>'استان','billing_city'=>'شهر','billing_address_1'=>'آدرس','billing_postcode'=>'کد پستی']; 
+                        foreach ($fields as $k=>$l): ?>
+                        <label style="display:block;margin:5px 0"><input type="checkbox" name="physical_fields[]" value="<?php echo $k; ?>" <?php checked(in_array($k,(array)$s['physical_fields'])); ?>> <?php echo $l; ?></label>
+                        <?php endforeach; ?>
+                    </td></tr>
+                    <tr><th>کد ملی</th><td>
+                        <label><input type="checkbox" name="enable_national_code" value="1" <?php checked($s['enable_national_code'],1); ?>> نمایش کد ملی</label><br>
+                        <label><input type="checkbox" name="national_code_required" value="1" <?php checked($s['national_code_required'],1); ?>> اجباری باشد</label>
+                    </td></tr>
+                </table>
+                
+                <h3 style="margin-top:30px">فیلدهای سفارشی</h3>
+                <div id="fcui-custom-fields">
+                    <?php foreach ((array)$s['custom_fields'] as $i=>$cf): ?>
+                    <div style="background:#f8fafc;padding:12px;margin:8px 0;border-radius:8px;display:grid;grid-template-columns:120px 1fr 80px 80px 60px;gap:8px;align-items:center">
+                        <input type="text" name="custom_fields[<?php echo $i; ?>][key]" value="<?php echo esc_attr($cf['key']); ?>" placeholder="کلید انگلیسی">
+                        <input type="text" name="custom_fields[<?php echo $i; ?>][label]" value="<?php echo esc_attr($cf['label']); ?>" placeholder="برچسب فارسی">
+                        <label><input type="checkbox" name="custom_fields[<?php echo $i; ?>][required]" value="1" <?php checked($cf['required'],1); ?>> اجباری</label>
+                        <label><input type="checkbox" name="custom_fields[<?php echo $i; ?>][active]" value="1" <?php checked($cf['active'],1); ?>> فعال</label>
+                        <input type="number" name="custom_fields[<?php echo $i; ?>][order]" value="<?php echo (int)$cf['order']; ?>" placeholder="ترتیب" style="width:60px">
+                    </div>
+                    <?php endforeach; ?>
+                </div>
+                <button type="button" onclick="addCustomField()" class="button">+ افزودن فیلد</button>
+                <script>
+                let cfIndex = <?php echo count((array)$s['custom_fields']); ?>;
+                function addCustomField(){
+                    const div = document.createElement('div');
+                    div.style.cssText = 'background:#f8fafc;padding:12px;margin:8px 0;border-radius:8px;display:grid;grid-template-columns:120px 1fr 80px 80px 60px;gap:8px;align-items:center';
+                    div.innerHTML = `<input type="text" name="custom_fields[${cfIndex}][key]" placeholder="کلید انگلیسی"><input type="text" name="custom_fields[${cfIndex}][label]" placeholder="برچسب فارسی"><label><input type="checkbox" name="custom_fields[${cfIndex}][required]" value="1"> اجباری</label><label><input type="checkbox" name="custom_fields[${cfIndex}][active]" value="1" checked> فعال</label><input type="number" name="custom_fields[${cfIndex}][order]" value="${cfIndex}" style="width:60px">`;
+                    document.getElementById('fcui-custom-fields').appendChild(div);
+                    cfIndex++;
+                }
+                </script>
+                <?php endif; ?>
+                
+                <?php if ($tab === 'card2card'): ?>
+                <table class="form-table">
+                    <tr><th>فعال</th><td><label><input type="checkbox" name="c2c_enabled" value="1" <?php checked($s['c2c_enabled'],1); ?>> فعال باشد</label></td></tr>
+                    <tr><th>شماره کارت</th><td><input type="text" name="c2c_card_number" value="<?php echo esc_attr($s['c2c_card_number']); ?>" class="regular-text" dir="ltr"></td></tr>
+                    <tr><th>نام صاحب کارت</th><td><input type="text" name="c2c_holder_name" value="<?php echo esc_attr($s['c2c_holder_name']); ?>" class="regular-text"></td></tr>
+                    <tr><th>نام بانک</th><td><input type="text" name="c2c_bank_name" value="<?php echo esc_attr($s['c2c_bank_name']); ?>" class="regular-text"></td></tr>
+                    <tr><th>تم</th><td>
+                        <select name="c2c_theme">
+                            <option value="blue" <?php selected($s['c2c_theme'],'blue'); ?>>آبی</option>
+                            <option value="red" <?php selected($s['c2c_theme'],'red'); ?>>قرمز</option>
+                            <option value="gold" <?php selected($s['c2c_theme'],'gold'); ?>>طلایی</option>
+                            <option value="dark" <?php selected($s['c2c_theme'],'dark'); ?>>مشکی</option>
+                        </select>
+                    </td></tr>
+                    <tr><th>تایمر (دقیقه)</th><td><input type="number" name="c2c_timer_minutes" value="<?php echo (int)$s['c2c_timer_minutes']; ?>" min="1"></td></tr>
+                </table>
+                <?php endif; ?>
+                
+                <?php if ($tab === 'messages'): ?>
+                <table class="form-table">
+                    <tr><th>عنوان موفقیت</th><td><input type="text" name="success_page_title" value="<?php echo esc_attr($s['success_page_title']); ?>" class="large-text"></td></tr>
+                    <tr><th>پیام آنلاین</th><td><textarea name="success_page_online_message" rows="3" class="large-text"><?php echo esc_textarea($s['success_page_online_message']); ?></textarea></td></tr>
+                    <tr><th>پیام کارت به کارت</th><td><textarea name="success_page_c2c_message" rows="3" class="large-text"><?php echo esc_textarea($s['success_page_c2c_message']); ?></textarea></td></tr>
+                    <tr><th>لینک دوره</th><td><input type="url" name="course_access_link" value="<?php echo esc_attr($s['course_access_link']); ?>" class="large-text" dir="ltr"></td></tr>
+                </table>
+                <?php endif; ?>
+                
+                <p style="margin-top:30px"><button class="button button-primary button-large" name="fcui_save" value="1">💾 ذخیره تنظیمات</button></p>
             </form>
-    
+            
+            <script>jQuery(document).ready(function($){$('.fcui-color').wpColorPicker();});</script>
         </div>
-    
         <?php
     }
-    
 
     public static function admin_card2card_orders_page() {
         if (!current_user_can('manage_woocommerce')) return;
-
         $s = self::get_settings();
 
-        // Approve action
         if (isset($_GET['fcui_approve']) && isset($_GET['_wpnonce'])) {
             $oid = absint($_GET['fcui_approve']);
             if (wp_verify_nonce($_GET['_wpnonce'], 'fcui_approve_' . $oid)) {
@@ -1229,83 +1095,83 @@ if (isset($_POST['fcui_free_register'])) {
                 if ($order && $order->get_payment_method() === 'fcui_card2card') {
                     $status = $s['c2c_approved_status'] === 'processing' ? 'processing' : 'completed';
                     $order->update_status($status, 'تأیید کارت به کارت توسط مدیر');
-                    $order->save();
-                    echo '<div class="updated"><p>سفارش تأیید شد.</p></div>';
+                    echo '<div class="notice notice-success"><p>✅ سفارش تأیید شد</p></div>';
                 }
             }
         }
-        // Reject action
-if (isset($_GET['fcui_reject']) && isset($_GET['_wpnonce'])) {
-    $oid = absint($_GET['fcui_reject']);
-    if (wp_verify_nonce($_GET['_wpnonce'], 'fcui_reject_' . $oid)) {
-        $order = wc_get_order($oid);
-        if ($order && $order->get_payment_method() === 'fcui_card2card') {
-            $order->update_status('cancelled', 'پرداخت کارت به کارت توسط مدیر رد شد');
-            $order->save();
-            echo '<div class="updated"><p>سفارش رد شد.</p></div>';
+        if (isset($_GET['fcui_reject']) && isset($_GET['_wpnonce'])) {
+            $oid = absint($_GET['fcui_reject']);
+            if (wp_verify_nonce($_GET['_wpnonce'], 'fcui_reject_' . $oid)) {
+                $order = wc_get_order($oid);
+                if ($order) {
+                    $order->update_status('cancelled', 'رد شده توسط مدیر');
+                    echo '<div class="notice notice-warning"><p>سفارش رد شد</p></div>';
+                }
+            }
         }
-    }
-}
 
-        // List on-hold card2card orders
-        $args = [
-            'limit'        => 50,
-            'status'       => ['on-hold'],
-            'payment_method' => 'fcui_card2card',
-            'orderby'      => 'date',
-            'order'        => 'DESC',
-            'return'       => 'objects',
-        ];
-        $orders = wc_get_orders($args);
-
+        $orders = wc_get_orders(['limit'=>50,'status'=>['on-hold'],'payment_method'=>'fcui_card2card','orderby'=>'date','order'=>'DESC']);
         ?>
-        <div class="wrap">
-          <h1>سفارش‌های کارت به کارت (در انتظار تأیید)</h1>
-
-          <table class="widefat striped">
-            <thead>
-              <tr>
-                <th>شماره سفارش</th>
-                <th>مشتری</th>
-                <th>مبلغ</th>
-                <th>رسید ۱</th>
-                <th>رسید ۲</th>
-                <th>اقدام</th>
-              </tr>
-            </thead>
+        <div class="wrap" style="direction:rtl">
+          <h1>سفارش‌های کارت به کارت</h1>
+          <table class="widefat striped" style="margin-top:20px">
+            <thead><tr><th>سفارش</th><th>مشتری</th><th>مبلغ</th><th>رسید</th><th>تاریخ</th><th>عملیات</th></tr></thead>
             <tbody>
               <?php if (empty($orders)): ?>
-                <tr><td colspan="6">سفارشی یافت نشد.</td></tr>
-              <?php else: ?>
-                <?php foreach ($orders as $order): ?>
-                  <?php
-                    $r1 = (string) $order->get_meta('_fcui_c2c_receipt_1');
-                    $r2 = (string) $order->get_meta('_fcui_c2c_receipt_2');
-                    $approve_url = wp_nonce_url(
-                        admin_url('admin.php?page=fcui-card2card-orders&fcui_approve=' . $order->get_id()),
-                        'fcui_approve_' . $order->get_id()
-                    );
-                    $reject_url = wp_nonce_url(
-                        admin_url('admin.php?page=fcui-card2card-orders&fcui_reject=' . $order->get_id()),
-                        'fcui_reject_' . $order->get_id()
-                    );
-                  ?>
-                  <tr>
-                    <td>#<?php echo (int)$order->get_id(); ?></td>
-                    <td><?php echo esc_html($order->get_formatted_billing_full_name()); ?></td>
-                    <td><?php echo wp_kses_post(wc_price($order->get_total())); ?></td>
-                    <td><?php echo $r1 ? '<a target="_blank" href="'.esc_url($r1).'">مشاهده</a>' : '—'; ?></td>
-                    <td><?php echo $r2 ? '<a target="_blank" href="'.esc_url($r2).'">مشاهده</a>' : '—'; ?></td>
-                    <td>
-                      <a class="button button-primary" href="<?php echo esc_url($approve_url); ?>">تأیید</a>
-                      <a class="button button-secondary fcui-reject-order" href="<?php echo esc_url($reject_url); ?>">رد</a>
-                      <a class="button" href="<?php echo esc_url(get_edit_post_link($order->get_id())); ?>">جزئیات</a>
-                    </td>
-                  </tr>
-                <?php endforeach; ?>
-              <?php endif; ?>
+                <tr><td colspan="6" style="text-align:center;padding:40px">سفارشی یافت نشد</td></tr>
+              <?php else: foreach ($orders as $order):
+                $r1 = $order->get_meta('_fcui_c2c_receipt_1');
+                $approve = wp_nonce_url(admin_url('admin.php?page=fcui-card2card-orders&fcui_approve='.$order->get_id()), 'fcui_approve_'.$order->get_id());
+                $reject = wp_nonce_url(admin_url('admin.php?page=fcui-card2card-orders&fcui_reject='.$order->get_id()), 'fcui_reject_'.$order->get_id());
+              ?>
+              <tr>
+                <td><strong>#<?php echo $order->get_id(); ?></strong></td>
+                <td><?php echo esc_html($order->get_formatted_billing_full_name()); ?><br><small><?php echo esc_html($order->get_billing_phone()); ?></small></td>
+                <td><?php echo wp_kses_post($order->get_formatted_order_total()); ?></td>
+                <td><?php echo $r1 ? '<a href="'.esc_url($r1).'" target="_blank" class="button button-small">مشاهده</a>' : '—'; ?></td>
+                <td><?php echo $order->get_date_created()->date_i18n('Y/m/d H:i'); ?></td>
+                <td>
+                  <a href="<?php echo esc_url($approve); ?>" class="button button-primary">✓ تأیید</a>
+                  <a href="<?php echo esc_url($reject); ?>" class="button">✗ رد</a>
+                </td>
+              </tr>
+              <?php endforeach; endif; ?>
             </tbody>
           </table>
+        </div>
+        <?php
+    }
+
+    public static function admin_tutorial_page() {
+        ?>
+        <div class="wrap" style="direction:rtl;max-width:900px">
+            <h1>📚 آموزش پرداخت سریع</h1>
+            
+            <div style="background:#fff;border:1px solid #e2e8f0;border-radius:16px;padding:30px;margin-top:20px">
+                <h2 style="color:#1e6bff">🎯 معرفی افزونه</h2>
+                <p style="line-height:2;font-size:15px">پرداخت سریع، فرآیند خرید ووکامرس را به یک صفحه ساده و بدون اسکرول تبدیل می‌کند. مشتری با یک کلیک وارد صفحه پرداخت می‌شود، اطلاعاتش را وارد می‌کند و پرداخت می‌کند.</p>
+                
+                <h3 style="margin-top:30px">✨ ویژگی‌های کلیدی</h3>
+                <ul style="line-height:2.2">
+                    <li>✅ <strong>پرداخت بدون اسکرول</strong> - طراحی شده برای موبایل</li>
+                    <li>✅ <strong>کد تخفیف</strong> - فیلد اختصاصی در صفحه پرداخت</li>
+                    <li>✅ <strong>محصولات فیزیکی</strong> - فیلد آدرس، کد پستی، کد ملی</li>
+                    <li>✅ <strong>کارت به کارت</strong> - آپلود رسید + تایید مدیر</li>
+                    <li>✅ <strong>شخصی‌سازی کامل</strong> - رنگ، متن، فیلدها</li>
+                </ul>
+                
+                <h3 style="margin-top:30px">🚀 راه‌اندازی</h3>
+                <ol style="line-height:2.2">
+                    <li>به <strong>تنظیمات > ظاهر</strong> بروید و رنگ برند خود را انتخاب کنید</li>
+                    <li>در تب <strong>محصولات فیزیکی</strong>، فیلدهای مورد نیاز را فعال کنید</li>
+                    <li>شماره کارت خود را در تب <strong>کارت به کارت</strong> وارد کنید</li>
+                    <li>صفحه پرداخت: <code><?php echo home_url('/fast-checkout/'); ?></code></li>
+                </ol>
+                
+                <div style="background:#f0f9ff;border-right:4px solid #0ea5e9;padding:16px;margin-top:30px;border-radius:8px">
+                    <strong>💡 نکته:</strong> برای محصولات دانلودی، فیلدها مینیمال است. برای فیزیکی، به صورت خودکار فیلد آدرس نمایش داده می‌شود.
+                </div>
+            </div>
         </div>
         <?php
     }
@@ -1313,21 +1179,10 @@ if (isset($_GET['fcui_reject']) && isset($_GET['_wpnonce'])) {
 
 FCUI_Fast_Checkout::init();
 
-// Shortcodes exist only to create pages; output handled by standalone render.
 add_shortcode('fcui_fast_checkout', function(){ return ''; });
 add_shortcode('fcui_card2card', function(){ return ''; });
+
 add_filter('woocommerce_get_return_url', function($url, $order){
-
-    if (!$order) {
-        return $url;
-    }
-
-    return home_url(
-        '/order-success/?order_id=' .
-        $order->get_id() .
-        '&key=' .
-        $order->get_order_key() .
-        '&type=online'
-    );
-
+    if (!$order) return $url;
+    return home_url('/order-success/?order_id=' . $order->get_id() . '&key=' . $order->get_order_key() . '&type=online');
 }, 10, 2);
