@@ -55,71 +55,109 @@ body.fcui-card2card{ margin:0; overflow:hidden; background:#f5f8ff; direction:rt
   color:#7c2d12; padding:10px; border-radius:14px; font-weight:800; margin-bottom:10px;
 }
 
-/* Bank card look - Iranian Banks */
+/* Bank card look - real Iranian bank card images */
 .fcui-c2c__card{
-  border: 1px solid rgba(255,255,255,.35);
+  width: min(100%, 560px);
+  margin: 0 auto;
+  aspect-ratio: 1.586 / 1;
   border-radius: 22px;
-  padding: 14px;
-  box-shadow: var(--sh);
+  box-shadow: 0 16px 46px rgba(15,23,42,.18);
   color:#fff;
   position: relative;
   overflow:hidden;
+  background-size: cover;
+  background-position: center;
+  background-repeat: no-repeat;
+  background-color: #0f172a;
+  border: 1px solid rgba(15,23,42,.10);
 }
-/* Old themes */
-body.fcui-c2c-theme-blue .fcui-c2c__card{ background: linear-gradient(135deg,#1e6bff,#003bbf); }
-body.fcui-c2c-theme-red  .fcui-c2c__card{ background: linear-gradient(135deg,#ef4444,#7f1d1d); }
-body.fcui-c2c-theme-gold .fcui-c2c__card{ background: linear-gradient(135deg,#f59e0b,#7c2d12); }
-body.fcui-c2c-theme-dark .fcui-c2c__card{ background: linear-gradient(135deg,#0f172a,#111827); }
 
-/* New Iranian Bank Themes */
-body.fcui-c2c-theme-melli .fcui-c2c__card{ background: linear-gradient(135deg,#00a95c,#007a42); }
-body.fcui-c2c-theme-mellat .fcui-c2c__card{ background: linear-gradient(135deg,#d81e05,#9c1604); }
-body.fcui-c2c-theme-saderat .fcui-c2c__card{ background: linear-gradient(135deg,#004e92,#00264d); }
-body.fcui-c2c-theme-keshavarzi .fcui-c2c__card{ background: linear-gradient(135deg,#4caf50,#2e7d32); }
-body.fcui-c2c-theme-tejarat .fcui-c2c__card{ background: linear-gradient(135deg,#0054a6,#003366); }
-body.fcui-c2c-theme-pasargad .fcui-c2c__card{ background: linear-gradient(135deg,#fdb813,#e89a00); color:#000; }
-body.fcui-c2c-theme-pasargad .fcui-c2c__number, body.fcui-c2c-theme-pasargad .fcui-c2c__timer{ background:rgba(0,0,0,.08); border-color:rgba(0,0,0,.12); color:#000; }
-body.fcui-c2c-theme-blubank .fcui-c2c__card{ background: linear-gradient(135deg,#0099ff,#0066cc); }
-body.fcui-c2c-theme-sepah .fcui-c2c__card{ background: linear-gradient(135deg,#8b4513,#5d2f0d); }
+.fcui-c2c__card::after{
+  content:"";
+  position:absolute;
+  inset:0;
+  pointer-events:none;
+  background: linear-gradient(180deg, rgba(255,255,255,.03), rgba(0,0,0,.04));
+}
 
-.fcui-c2c__bank{ font-weight:950; opacity:.95; margin-bottom: 10px; }
+/* Keep old theme classes as harmless fallback if image is missing */
+body.fcui-c2c-theme-blue .fcui-c2c__card{ background-color:#1e6bff; }
+body.fcui-c2c-theme-red  .fcui-c2c__card{ background-color:#b91c1c; }
+body.fcui-c2c-theme-gold .fcui-c2c__card{ background-color:#b45309; }
+body.fcui-c2c-theme-dark .fcui-c2c__card{ background-color:#111827; }
+body.fcui-c2c-theme-melli .fcui-c2c__card{ background-color:#0f4d88; }
+body.fcui-c2c-theme-mellat .fcui-c2c__card{ background-color:#b00014; }
+body.fcui-c2c-theme-saderat .fcui-c2c__card{ background-color:#073a91; }
+body.fcui-c2c-theme-keshavarzi .fcui-c2c__card{ background-color:#0f5f34; }
+body.fcui-c2c-theme-tejarat .fcui-c2c__card{ background-color:#062a60; }
+body.fcui-c2c-theme-pasargad .fcui-c2c__card{ background-color:#151515; }
+body.fcui-c2c-theme-saman .fcui-c2c__card{ background-color:#0b69b7; }
+body.fcui-c2c-theme-blubank .fcui-c2c__card{ background-color:#0b69b7; }
+body.fcui-c2c-theme-sepah .fcui-c2c__card{ background-color:#151515; }
+
+.fcui-c2c__number,
+.fcui-c2c__value{
+  position:absolute;
+  z-index:2;
+  transform: translate(-50%, -50%);
+  white-space:nowrap;
+  line-height:1.2;
+  max-width:88%;
+  text-align:center;
+}
 
 .fcui-c2c__number{
-  display:flex; align-items:center; justify-content:space-between; gap:10px;
-  font-weight:950; font-size: 18px; letter-spacing:.5px;
-  padding: 10px 12px;
-  border-radius: 16px;
-  background: rgba(255,255,255,.12);
-  border: 1px solid rgba(255,255,255,.18);
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  gap:10px;
+  direction:ltr;
+  font-family: inherit;
+  letter-spacing:1px;
+  unicode-bidi:isolate;
 }
 
 .fcui-c2c__copy{
   border:0;
-  background: rgba(255,255,255,.18);
+  background: rgba(15,23,42,.55);
+  backdrop-filter: blur(6px);
   color:#fff;
   font-weight:900;
-  border-radius: 12px;
-  padding: 8px 10px;
+  border-radius: 999px;
+  padding: 5px 9px;
   cursor:pointer;
+  font-size:11px;
+  line-height:1;
+  opacity:.85;
+}
+.fcui-c2c__copy:hover{ opacity:1; }
+
+.fcui-c2c__payment-info{
+  background: var(--card);
+  border:1px solid var(--b);
+  border-radius: 18px;
+  padding: 12px;
+  box-shadow: 0 8px 24px rgba(15,23,42,.06);
 }
 
 .fcui-c2c__row{
   display:flex; justify-content:space-between; align-items:center; gap:10px;
-  margin-top: 10px;
 }
-.fcui-c2c__label{ opacity:.85; font-weight:800; font-size: 12px; }
-.fcui-c2c__value{
+.fcui-c2c__label{ color:rgba(15,23,42,.65); font-weight:800; font-size: 12px; }
+.fcui-c2c__amount{
   display:flex; align-items:center; gap:8px;
   font-weight:950;
+  color:#0f172a;
 }
 
 .fcui-c2c__timer{
-  margin-top: 12px;
+  margin-top: 10px;
   display:flex; align-items:center; justify-content:space-between;
   padding: 10px 12px;
-  border-radius: 16px;
-  background: rgba(255,255,255,.10);
-  border: 1px solid rgba(255,255,255,.16);
+  border-radius: 14px;
+  background: rgba(30,107,255,.08);
+  border: 1px solid rgba(30,107,255,.12);
+  color:#0f172a;
   font-weight:900;
 }
 
@@ -157,3 +195,64 @@ body.fcui-c2c-theme-sepah .fcui-c2c__card{ background: linear-gradient(135deg,#8
   color: rgba(15,23,42,.55);
   font-weight:800;
 }
+@media (max-width: 520px){
+  .fcui-c2c__number{letter-spacing:.5px}
+  .fcui-c2c__copy{font-size:10px;padding:4px 7px}
+  .fcui-c2c__card{border-radius:18px}
+}
+
+@font-face{font-family:FCUI_IRANSans;src:url('fonts/IRANSans-FaNum.woff2') format('woff2');font-display:swap}
+@font-face{font-family:FCUI_IRANYekan;src:url('fonts/IRANYekanX-Regular.woff2') format('woff2');font-display:swap}
+@font-face{font-family:FCUI_Dana;src:url('fonts/Dana-FaNum-Regular.ttf') format('truetype');font-display:swap}
+@font-face{font-family:FCUI_Kalameh;src:url('fonts/KalamehWebFaNum-Medium.woff2') format('woff2');font-display:swap}
+@font-face{font-family:FCUI_Peyda;src:url('fonts/PeydaWeb-Regular.woff') format('woff');font-display:swap}
+
+/* Checkout visual themes */
+body.fcui-style-glass{background:radial-gradient(circle at top right, color-mix(in srgb,var(--p) 22%,transparent), transparent 35%), linear-gradient(135deg,#eef6ff,#f8fbff)!important}
+body.fcui-style-glass .fcui__card,body.fcui-style-glass .fcui__summary,body.fcui-style-glass .fcui-c2c__upload,body.fcui-style-glass .fcui-c2c__payment-info{background:rgba(255,255,255,.74)!important;backdrop-filter:blur(14px);border-color:rgba(255,255,255,.55)!important}
+body.fcui-style-minimal{background:#fff!important}.fcui-style-minimal .fcui__card,.fcui-style-minimal .fcui__summary,.fcui-style-minimal .fcui-c2c__upload,.fcui-style-minimal .fcui-c2c__payment-info{box-shadow:none!important;border:1px solid var(--fcui-border)!important}
+body.fcui-style-dark{background:#0b1020!important;color:#e5e7eb}.fcui-style-dark .fcui,.fcui-style-dark .fcui-c2c{color:#e5e7eb}.fcui-style-dark .fcui__card,.fcui-style-dark .fcui__summary,.fcui-style-dark .fcui-c2c__upload,.fcui-style-dark .fcui-c2c__payment-info{background:#111827!important;border-color:rgba(255,255,255,.12)!important;color:#e5e7eb!important}.fcui-style-dark input{background:#0f172a!important;color:#fff!important}
+body.fcui-style-colorful{background:linear-gradient(135deg, color-mix(in srgb,var(--p) 18%,#fff), #fff6e8 55%, #eefbf6)!important}.fcui-style-colorful .fcui__btn--primary,.fcui-style-colorful .fcui-c2c__submit{background:linear-gradient(135deg,var(--p),#f97316)!important}
+body.fcui-popup-mode{background:rgba(15,23,42,.62)!important}.fcui-popup-mode .fcui__app,.fcui-popup-mode .fcui-c2c__app{min-height:100dvh;justify-content:center}.fcui-popup-mode .fcui__app:before,.fcui-popup-mode .fcui-c2c__app:before{content:"";position:fixed;inset:0;background:rgba(15,23,42,.35);z-index:-1}
+
+/* Admin switches + mobile preview */
+.fcui-admin input[type="checkbox"]{appearance:none;-webkit-appearance:none;width:46px!important;height:24px!important;border-radius:999px!important;background:#cbd5e1!important;border:0!important;position:relative;cursor:pointer;vertical-align:middle;transition:.2s;box-shadow:inset 0 1px 3px rgba(0,0,0,.12)}
+.fcui-admin input[type="checkbox"]:before{content:"";position:absolute;width:18px;height:18px;right:3px;top:3px;background:#fff;border-radius:50%;transition:.2s;box-shadow:0 1px 4px rgba(0,0,0,.25)}
+.fcui-admin input[type="checkbox"]:checked{background:#1e6bff!important}.fcui-admin input[type="checkbox"]:checked:before{right:25px}.fcui-admin-switch-row{display:flex;align-items:center;gap:10px;font-weight:800}
+.fcui-mobile-frame{width:310px;max-width:100%;margin:auto;background:#0f172a;border-radius:36px;padding:12px;box-shadow:0 22px 60px rgba(15,23,42,.25)}
+.fcui-mobile-screen{min-height:560px;border-radius:28px;background:var(--bg);padding:28px 14px;color:var(--txt);overflow:hidden;transition:.2s}.fcui-preview-card{background:var(--card);border:1px solid var(--bd);border-radius:var(--r);padding:16px;box-shadow:0 12px 36px rgba(15,23,42,.12)}.fcui-preview-title{font-weight:950;font-size:18px;margin-bottom:18px}.fcui-preview-product{height:70px;border-radius:16px;background:linear-gradient(135deg,var(--p),#93c5fd);margin-bottom:12px}.fcui-preview-input{padding:12px;border:1px solid var(--bd);border-radius:12px;background:#f8fafc;color:#64748b;margin-bottom:10px}.fcui-preview-pay{padding:13px;border-radius:var(--br);background:var(--p);color:#fff;text-align:center;font-weight:900;margin-top:12px}.fcui-preview-theme-glass{background:linear-gradient(135deg,#e0f2fe,#fff)}.fcui-preview-theme-glass .fcui-preview-card{background:rgba(255,255,255,.72);backdrop-filter:blur(10px)}.fcui-preview-theme-minimal{background:#fff}.fcui-preview-theme-minimal .fcui-preview-card{box-shadow:none}.fcui-preview-theme-dark{background:#0b1020;color:#fff}.fcui-preview-theme-dark .fcui-preview-card{background:#111827;color:#fff;border-color:rgba(255,255,255,.12)}.fcui-preview-theme-colorful{background:linear-gradient(135deg,#dbeafe,#fff7ed)}.fcui-preview-theme-colorful .fcui-preview-pay{background:linear-gradient(135deg,var(--p),#f97316)}
+
+/* v2.4.2 card text and theme consistency */
+.fcui-card-preview__copy{position:absolute;left:12px;bottom:12px;z-index:4;border:0;border-radius:999px;background:rgba(15,23,42,.68);color:#fff;padding:7px 11px;font-weight:900;font-size:11px;cursor:pointer;backdrop-filter:blur(8px)}
+.fcui-card-preview__text[data-field="number"],.fcui-c2c__number{direction:ltr;unicode-bidi:isolate;font-family:inherit!important;letter-spacing:1px}
+body.fcui-style-glass{background:radial-gradient(circle at 20% 10%, color-mix(in srgb,var(--p) 35%,transparent), transparent 30%),var(--bg)!important}body.fcui-style-glass .fcui-c2c__upload,body.fcui-style-glass .fcui-c2c__payment-info{background:color-mix(in srgb,var(--card) 76%,transparent)!important;backdrop-filter:blur(18px)}
+body.fcui-style-minimal .fcui-c2c__upload,body.fcui-style-minimal .fcui-c2c__payment-info{box-shadow:none!important;border-width:2px!important}
+body.fcui-style-dark{background:linear-gradient(135deg,color-mix(in srgb,var(--bg) 75%,#020617),#020617)!important}body.fcui-style-dark .fcui-c2c__upload,body.fcui-style-dark .fcui-c2c__payment-info{background:var(--card)!important;color:var(--fcui-text)!important;border-color:var(--fcui-border)!important}
+body.fcui-style-colorful .fcui-c2c__topbar{background:linear-gradient(135deg,var(--p),var(--s));color:#fff;border:0}body.fcui-style-colorful .fcui-c2c__payment-info{border-right:5px solid var(--p)!important}
+
+/* v2.4.3 theme set for card2card */
+body.fcui-style-neumorphic{background:var(--bg)!important}.fcui-style-neumorphic .fcui-c2c__topbar,.fcui-style-neumorphic .fcui-c2c__upload,.fcui-style-neumorphic .fcui-c2c__payment-info{background:var(--bg)!important;border:0!important;box-shadow:10px 10px 24px rgba(148,163,184,.42),-10px -10px 24px rgba(255,255,255,.9)!important}
+body.fcui-style-skeuomorphic{background:linear-gradient(135deg,color-mix(in srgb,var(--bg) 80%,#fef3c7),color-mix(in srgb,var(--bg) 88%,#dbeafe))!important}.fcui-style-skeuomorphic .fcui-c2c__topbar,.fcui-style-skeuomorphic .fcui-c2c__upload,.fcui-style-skeuomorphic .fcui-c2c__payment-info{background:linear-gradient(180deg,#fff,var(--card))!important;border:1px solid color-mix(in srgb,var(--b) 70%,#fff)!important;box-shadow:inset 0 1px 0 #fff,0 14px 28px rgba(15,23,42,.18)!important}.fcui-style-skeuomorphic .fcui-c2c__submit{background:linear-gradient(180deg,color-mix(in srgb,var(--p) 80%,#fff),var(--p))!important;box-shadow:inset 0 1px 0 rgba(255,255,255,.35),0 8px 0 color-mix(in srgb,var(--p) 65%,#000)!important}
+body.fcui-style-dark_classic{background:#090d18!important}.fcui-style-dark_classic .fcui-c2c{color:#e5e7eb!important}.fcui-style-dark_classic .fcui-c2c__topbar,.fcui-style-dark_classic .fcui-c2c__upload,.fcui-style-dark_classic .fcui-c2c__payment-info{background:#111827!important;color:#e5e7eb!important;border-color:rgba(255,255,255,.12)!important}.fcui-style-dark_classic input{background:#0b1020!important;color:#fff!important;border-color:rgba(255,255,255,.14)!important}
+
+/* v2.4.4 stronger card2card themed controls */
+body.fcui-style-neumorphic .fcui-c2c input,body.fcui-style-neumorphic .fcui-c2c select,body.fcui-style-neumorphic .fcui-c2c textarea{background:var(--bg)!important;border:0!important;box-shadow:inset 5px 5px 12px rgba(148,163,184,.42),inset -5px -5px 12px rgba(255,255,255,.9)!important;color:var(--fcui-text)!important;border-radius:var(--br)!important}body.fcui-style-neumorphic .fcui-c2c button,body.fcui-style-neumorphic .fcui-c2c__submit{border:0!important;box-shadow:7px 7px 16px rgba(148,163,184,.42),-7px -7px 16px rgba(255,255,255,.9)!important}
+body.fcui-style-skeuomorphic .fcui-c2c input,body.fcui-style-skeuomorphic .fcui-c2c select,body.fcui-style-skeuomorphic .fcui-c2c textarea{background:linear-gradient(180deg,#fff,var(--fcui-input-bg))!important;border:1px solid color-mix(in srgb,var(--fcui-border) 80%,#94a3b8)!important;box-shadow:inset 0 2px 4px rgba(15,23,42,.10),0 1px 0 rgba(255,255,255,.9)!important;border-radius:var(--br)!important}body.fcui-style-skeuomorphic .fcui-c2c button,body.fcui-style-skeuomorphic .fcui-c2c__submit{border:1px solid rgba(255,255,255,.5)!important;text-shadow:0 1px 1px rgba(0,0,0,.25)!important}
+
+/* v2.4.5 upload, copy, responsive card text, desktop */
+.fcui-c2c{font-size:14px!important;line-height:1.65}.fcui-c2c input,.fcui-c2c button{font-size:13px!important}.fcui-c2c__card{--fcui-card-text-scale:clamp(.58, min(2.8vw, 1.6vh), 1)}.fcui-c2c__value,.fcui-c2c__number{max-width:82%;overflow:visible}.fcui-c2c__copy{width:30px;height:30px;padding:0!important;border-radius:50%!important;font-size:0!important;background:rgba(255,255,255,.18)!important;border:1px solid rgba(255,255,255,.32)!important;display:inline-flex!important;align-items:center;justify-content:center;backdrop-filter:blur(8px)}.fcui-c2c__copy:before{content:'⧉';font-size:14px;color:#fff}.fcui-c2c__fileInput{position:absolute!important;width:1px!important;height:1px!important;opacity:0!important;pointer-events:none!important}.fcui-c2c__uploadBtn{display:inline-flex;align-items:center;justify-content:center;gap:8px;padding:11px 16px;border-radius:var(--br,14px);background:linear-gradient(135deg,var(--p,#1e6bff),color-mix(in srgb,var(--p,#1e6bff) 72%,#000));color:#fff;font-weight:900;cursor:pointer;box-shadow:0 10px 24px rgba(30,107,255,.22)}.fcui-c2c__uploadBtn:before{content:'↑';font-weight:900}.fcui-c2c__fileName{display:inline-block;margin-right:10px;color:#64748b;font-size:12px;font-weight:800}@media(min-width:1024px){body.fcui-card2card{overflow:auto!important}.fcui-c2c__app{max-width:860px!important;padding:22px!important}.fcui-c2c__main{display:grid!important;grid-template-columns:1fr 360px;gap:16px}.fcui-c2c__card{grid-column:1 / -1;max-width:680px}.fcui-c2c__payment-info,.fcui-c2c__upload{align-self:start}}
+
+/* v2.4.6 c2c copy/card exact scaling */
+.fcui-c2c__card{container-type:inline-size}.fcui-c2c__number,.fcui-c2c__value{line-height:1.15!important;transform:translate(-50%,-50%)!important}.fcui-c2c__copy{width:auto!important;min-width:34px;height:28px!important;padding:0 9px!important;border-radius:999px!important;font-size:11px!important;background:rgba(15,23,42,.58)!important;color:transparent!important}.fcui-c2c__copy:before{content:'کپی';font-size:11px;color:#fff}.fcui-c2c__copy:after{content:' ⧉';font-size:12px;color:#fff}@media(min-width:1024px){.fcui-c2c__app{max-width:980px!important}.fcui-c2c__main{grid-template-columns:minmax(520px,1fr) 360px!important;gap:20px!important}.fcui-c2c__card{max-width:720px!important;border-radius:30px!important}.fcui-c2c__payment-info,.fcui-c2c__upload{border-radius:24px!important;padding:20px!important}}
+
+/* v2.4.7 final copy + exact card text */
+.fcui-c2c__card{container-type:inline-size!important}.fcui-c2c__number,.fcui-c2c__value{line-height:1.12!important;transform:translate(-50%,-50%)!important;transform-origin:center center!important;max-width:92%!important}.fcui-c2c__copy{font-size:11px!important;color:inherit!important;background:transparent!important;border:1px dashed currentColor!important;border-radius:8px!important;min-width:auto!important;width:auto!important;height:auto!important;padding:3px 7px!important;box-shadow:none!important;backdrop-filter:none!important;line-height:1.2!important;margin-right:6px;opacity:.9}.fcui-c2c__copy:before,.fcui-c2c__copy:after{content:none!important}.fcui-c2c__copy:hover{opacity:1;background:rgba(255,255,255,.12)!important;transform:none!important}.fcui-c2c-toast{position:fixed;left:50%;bottom:24px;transform:translateX(-50%);background:#0f172a;color:#fff;border-radius:999px;padding:10px 16px;font-weight:900;font-size:13px;z-index:9999999;box-shadow:0 12px 34px rgba(15,23,42,.24)}
+
+/* v2.4.8 copy no theme shadow */
+.fcui-c2c__copy,body.fcui-style-neumorphic .fcui-c2c__copy,body.fcui-style-skeuomorphic .fcui-c2c__copy{box-shadow:none!important;text-shadow:none!important;background:transparent!important;border:1px dashed currentColor!important;color:inherit!important}.fcui-c2c__number .fcui-c2c__copy{font-size:11px!important}
+
+/* v2.4.9 final dark theme + copy */
+body.fcui-style-dark_classic{--bg:#070b14!important;--card:#111827!important;--fcui-input-bg:#0b1020!important;--fcui-text:#e5e7eb!important;--fcui-border:rgba(255,255,255,.14)!important;--p:#60a5fa!important;--s:#a78bfa!important;background:radial-gradient(circle at top right,rgba(96,165,250,.16),transparent 34%),#070b14!important;color:#e5e7eb!important}body.fcui-style-dark_classic .fcui-c2c,body.fcui-style-dark_classic .fcui-c2c *:not(.fcui-c2c__card *){color:#e5e7eb!important}body.fcui-style-dark_classic .fcui-c2c__topbar,body.fcui-style-dark_classic .fcui-c2c__upload,body.fcui-style-dark_classic .fcui-c2c__payment-info{background:#111827!important;border-color:rgba(255,255,255,.14)!important;box-shadow:0 18px 45px rgba(0,0,0,.35)!important}body.fcui-style-dark_classic input{background:#0b1020!important;border-color:rgba(255,255,255,.16)!important;color:#fff!important}body.fcui-style-dark_classic .fcui-c2c__timer{background:rgba(96,165,250,.12)!important;border-color:rgba(96,165,250,.22)!important;color:#e5e7eb!important}.fcui-c2c__copy,body.fcui-style-neumorphic .fcui-c2c__copy,body.fcui-style-skeuomorphic .fcui-c2c__copy,body.fcui-style-dark_classic .fcui-c2c__copy{padding:5px 10px!important;font-size:12px!important;line-height:1.25!important;border:1px dashed currentColor!important;border-radius:9px!important;background:transparent!important;box-shadow:none!important;text-shadow:none!important;color:inherit!important;min-width:auto!important;width:auto!important;height:auto!important}
+
+/* v2.5.0 desktop column + dark back button */
+@media(min-width:1024px){body.fcui-card2card:not(.fcui-popup-mode) .fcui-c2c__app{max-width:760px!important;margin:0 auto!important;padding:22px 14px!important}body.fcui-card2card:not(.fcui-popup-mode) .fcui-c2c__main{display:flex!important;flex-direction:column!important;grid-template-columns:none!important;gap:14px!important}body.fcui-card2card:not(.fcui-popup-mode) .fcui-c2c__card,body.fcui-card2card:not(.fcui-popup-mode) .fcui-c2c__payment-info,body.fcui-card2card:not(.fcui-popup-mode) .fcui-c2c__upload{width:100%!important;max-width:100%!important;grid-column:auto!important}}body.fcui-style-dark_classic .fcui-c2c__back{background:rgba(96,165,250,.14)!important;color:#bfdbfe!important;border:1px solid rgba(96,165,250,.24)!important;box-shadow:none!important}

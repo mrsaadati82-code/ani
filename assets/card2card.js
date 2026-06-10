@@ -18,8 +18,11 @@
     if (!btn) return;
     e.preventDefault();
     copyText(btn.getAttribute('data-copy-btn'));
-    btn.textContent = 'کپی شد';
-    setTimeout(function(){ btn.textContent = 'کپی'; }, 1200);
+    var toast = document.createElement('div');
+    toast.className = 'fcui-c2c-toast';
+    toast.textContent = 'شماره کارت کپی شد';
+    document.body.appendChild(toast);
+    setTimeout(function(){ toast.remove(); }, 1800);
   });
 
   // show receipt2 after receipt1 chosen
@@ -81,3 +84,23 @@ document.addEventListener("DOMContentLoaded", function(){
   });
 
 });
+
+(function(){
+  function scaleBankCardText(){
+    document.querySelectorAll('.fcui-c2c__card').forEach(function(card){
+      var w = card.getBoundingClientRect().width || 520;
+      var scale = w / 520;
+      card.querySelectorAll('[data-fcui-card-text]').forEach(function(el){
+        var base = parseFloat(el.getAttribute('data-base-size') || '16');
+        el.style.fontSize = (base * scale) + 'px';
+      });
+    });
+  }
+  window.FCUI_SCALE_BANK_CARD_TEXT = scaleBankCardText;
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', scaleBankCardText); else scaleBankCardText();
+  window.addEventListener('resize', scaleBankCardText);
+  if (window.ResizeObserver) {
+    var ro = new ResizeObserver(scaleBankCardText);
+    document.querySelectorAll('.fcui-c2c__card').forEach(function(card){ ro.observe(card); });
+  }
+})();

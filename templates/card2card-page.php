@@ -3,11 +3,16 @@
 $s = FCUI_Fast_Checkout::get_settings();
 
 $card_number = (string)$s['c2c_card_number'];
+$card_number_clean = FCUI_Fast_Checkout::clean_card_number($card_number);
+$card_number_display = FCUI_Fast_Checkout::format_card_number($card_number);
 $holder_name = (string)$s['c2c_holder_name'];
 $bank_name   = (string)$s['c2c_bank_name'];
+$theme       = sanitize_key($s['c2c_theme'] ?? 'melli');
+$card_image  = FCUI_Fast_Checkout::get_bank_card_image_url($theme);
+$card_style  = FCUI_Fast_Checkout::get_card_style($theme);
 
 $expires_at  = (int)$order->get_meta('_fcui_c2c_expires_at');
-$amount_html = wc_price($order->get_total());
+$amount_html = FCUI_Fast_Checkout::price_html($order->get_total());
 
 $r1 = (string)$order->get_meta('_fcui_c2c_receipt_1');
 $ok = !empty($_GET['ok']);
@@ -41,21 +46,20 @@ function fcui_err_msg($err){
         <div class="fcui-c2c__warn"><?php echo esc_html(fcui_err_msg($err)); ?></div>
       <?php endif; ?>
 
-      <section class="fcui-c2c__card">
-        <div class="fcui-c2c__bank"><?php echo esc_html($bank_name); ?></div>
-        <div class="fcui-c2c__number" data-copy="<?php echo esc_attr($card_number); ?>">
-          <?php echo esc_html($card_number); ?>
-          <button type="button" class="fcui-c2c__copy" data-copy-btn="<?php echo esc_attr($card_number); ?>">کپی</button>
+      <section class="fcui-c2c__card" style="<?php echo $card_image ? 'background-image:url(' . esc_url($card_image) . ');' : ''; ?>">
+        <div class="fcui-c2c__number" data-fcui-card-text="1" data-base-size="<?php echo (int)$card_style['number']['size']; ?>" data-copy="<?php echo esc_attr($card_number_clean); ?>" dir="ltr" style="left:<?php echo esc_attr($card_style['number']['x']); ?>%;top:<?php echo esc_attr($card_style['number']['y']); ?>%;color:<?php echo esc_attr($card_style['number']['color']); ?>;font-size:<?php echo (int)$card_style['number']['size']; ?>px;font-weight:<?php echo (int)$card_style['number']['weight']; ?>;text-shadow:<?php echo !empty($card_style['number']['shadow']) ? '0 2px 6px rgba(0,0,0,.65)' : 'none'; ?>">
+          <bdi dir="ltr"><?php echo esc_html($card_number_display); ?></bdi>
+          <button type="button" class="fcui-c2c__copy" data-copy-btn="<?php echo esc_attr($card_number_clean); ?>">کپی</button>
         </div>
-        <div class="fcui-c2c__row">
-          <div class="fcui-c2c__label">نام صاحب کارت</div>
-          <div class="fcui-c2c__value" data-copy="<?php echo esc_attr($holder_name); ?>">
-            <?php echo esc_html($holder_name); ?>
-          </div>
+        <div class="fcui-c2c__value" data-fcui-card-text="1" data-base-size="<?php echo (int)$card_style['holder']['size']; ?>" data-copy="<?php echo esc_attr($holder_name); ?>" style="left:<?php echo esc_attr($card_style['holder']['x']); ?>%;top:<?php echo esc_attr($card_style['holder']['y']); ?>%;color:<?php echo esc_attr($card_style['holder']['color']); ?>;font-size:<?php echo (int)$card_style['holder']['size']; ?>px;font-weight:<?php echo (int)$card_style['holder']['weight']; ?>;text-shadow:<?php echo !empty($card_style['holder']['shadow']) ? '0 2px 6px rgba(0,0,0,.65)' : 'none'; ?>">
+          <?php echo esc_html(FCUI_Fast_Checkout::fa_digits($holder_name)); ?>
         </div>
+      </section>
+
+      <section class="fcui-c2c__payment-info">
         <div class="fcui-c2c__row">
           <div class="fcui-c2c__label">مبلغ قابل واریز</div>
-          <div class="fcui-c2c__value"><?php echo wp_kses_post($amount_html); ?></div>
+          <div class="fcui-c2c__amount"><?php echo wp_kses_post($amount_html); ?></div>
         </div>
 
         <div class="fcui-c2c__timer" data-expires="<?php echo (int)$expires_at; ?>">
@@ -70,7 +74,9 @@ function fcui_err_msg($err){
 
           <div class="fcui-c2c__urow">
             <label class="fcui-c2c__ulabel">رسید ۱ (اجباری)</label>
-            <input id="fcui-receipt-input" type="file" name="receipt_1" accept="image/*,.pdf" required>
+            <input id="fcui-receipt-input" class="fcui-c2c__fileInput" type="file" name="receipt_1" accept="image/*,.pdf" required>
+            <label for="fcui-receipt-input" class="fcui-c2c__uploadBtn">آپلود رسید</label>
+            <span id="fcui-receipt-name" class="fcui-c2c__fileName">فایلی انتخاب نشده</span>
 
             <button type="button" id="fcui-view-receipt" class="fcui-c2c__link" style="display:none">
               مشاهده رسید
@@ -111,6 +117,7 @@ if(!file) return
 const url = URL.createObjectURL(file)
 
 btn.style.display="inline-block"
+if(document.getElementById("fcui-receipt-name")){document.getElementById("fcui-receipt-name").textContent=file.name}
 
 btn.onclick=function(){
 

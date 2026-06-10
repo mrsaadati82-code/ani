@@ -31,7 +31,7 @@ $fields = (array)$s['physical_fields'];
 <div class="fcui__sumBody">
 <div class="fcui__name" style="font-size:13px"><?php echo esc_html($title); ?></div>
 <div class="fcui__sumRow">
-<div class="fcui__sumPrice" style="font-size:16px"><?php echo wp_kses_post(wc_price($price)); ?></div>
+<div class="fcui__sumPrice" style="font-size:16px"><?php echo wp_kses_post(FCUI_Fast_Checkout::price_html($price)); ?></div>
 <?php if ($has_discount): ?>
 <span class="fcui__badge"><?php echo esc_html($discount_pct); ?>%</span>
 <?php endif; ?>
@@ -114,8 +114,12 @@ $fields = (array)$s['physical_fields'];
 </section>
 
 <?php if(!$is_free && !empty($s['coupon_enabled'])): ?>
-<div style="margin-top:8px;display:flex;gap:6px">
-<input type="text" name="fcui_coupon" placeholder="<?php echo esc_attr($s['coupon_placeholder']); ?>" style="flex:1;padding:8px 10px;border:1px solid rgba(15,23,42,.12);border-radius:10px;background:#fff;font-size:12px">
+<div class="fcui__coupon fcui__coupon--compact">
+<label class="fcui__couponLabel"><?php echo esc_html($s['coupon_label']); ?></label>
+<div class="fcui__couponRow">
+<input type="text" name="fcui_coupon" placeholder="<?php echo esc_attr($s['coupon_placeholder']); ?>">
+<button type="button" class="fcui__couponBtn">اعمال</button>
+</div>
 </div>
 <?php endif; ?>
 

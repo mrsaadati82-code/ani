@@ -30,10 +30,10 @@ $s = FCUI_Fast_Checkout::get_settings();
 <div class="fcui__sumBody">
 <div class="fcui__name"><?php echo esc_html($title); ?></div>
 <div class="fcui__sumRow">
-<div class="fcui__sumPrice"><?php echo wp_kses_post(wc_price($price)); ?></div>
+<div class="fcui__sumPrice"><?php echo wp_kses_post(FCUI_Fast_Checkout::price_html($price)); ?></div>
 <?php if ($has_discount): ?>
 <div class="fcui__sumDiscount">
-<span class="fcui__sumRegular"><?php echo wp_kses_post(wc_price($regular)); ?></span>
+<span class="fcui__sumRegular"><?php echo wp_kses_post(FCUI_Fast_Checkout::price_html($regular)); ?></span>
 <span class="fcui__badge"><?php echo esc_html($discount_pct); ?>% تخفیف</span>
 </div>
 <?php endif; ?>
@@ -79,10 +79,12 @@ $s = FCUI_Fast_Checkout::get_settings();
 
 <?php if(!$is_free && !empty($s['coupon_enabled'])): ?>
 <section class="fcui__card fcui__coupon">
-<div style="display:flex;gap:8px;align-items:center">
-<input type="text" name="fcui_coupon" placeholder="<?php echo esc_attr($s['coupon_placeholder']); ?>" style="flex:1;padding:10px 12px;border:1px solid rgba(15,23,42,.12);border-radius:12px;background:#f8fafc;font-size:13px">
-<span style="font-size:12px;color:#64748b;white-space:nowrap"><?php echo esc_html($s['coupon_label']); ?></span>
+<label class="fcui__couponLabel"><?php echo esc_html($s['coupon_label']); ?></label>
+<div class="fcui__couponRow">
+<input type="text" name="fcui_coupon" placeholder="<?php echo esc_attr($s['coupon_placeholder']); ?>">
+<button type="button" class="fcui__couponBtn">اعمال تخفیف</button>
 </div>
+<div class="fcui__couponHint">کد تخفیف هنگام ثبت سفارش بررسی و اعمال می‌شود.</div>
 </section>
 <?php endif; ?>
 
